@@ -115,10 +115,10 @@ process_eval:
     //      0x0080..0x0280      opcodes jump table  [16 words]  (256 opcodes)
     //      0x0280..0x0300      extended jump table [4 words]   (64 opcodes)
     //      0x0300..0x0500      registers           [32 words]
-    //      0x0500..         -> code ptr (not adapted)
+    //      0x0500..         -> code ptr
 
 
-    //  Main loop stack layout:
+    //  Main loop EVM-stack layout:
     //  dup<n>  value       desc        (explained desc)
     //  13      0x80        const       0x80
     //  12      0x60        const       0x60
@@ -129,51 +129,53 @@ process_eval:
     //  7       0xF8        const       (to shift 31 bytes right)
     //  6       0xFF        const       (to trunc mod 2⁸ (8-bit value, a byte))
     //  5       0xFFFF      const       (to trunc mod 2¹⁶ (16-bit value, a jump location))
-    //  4       <SP>        stack_ptr   (points to the beggining of the stack)
+    //  4       <SP>        stack_ptr   (points to the beggining of the stack) [ActorVM-stack]
     //  3       <CE>        code_end    (points to the end of code)
     //  2       <TOP>       top_ptr     (points to the next free word on the stack) [require: SP <= TOP]
     //  1       <CP>        code_ptr    (points to the next opcode to be processed) [require: CP < CE]
 
-    //  In one row notation:                // [<CP>, <TOP>, <CE>, <SP>, const...]
+    //  In one row notation:                        // [<CP>, <TOP>, <CE>, <SP>, const...]
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // push all the constants first
-    0x80 0x60 0x40 0x20 0x01 0x1F 0xF8 0xFF 0xFFFF                      // [const...]
+    0x80 0x60 0x40 0x20 0x01 0x1F 0xF8 0xFF 0xFFFF  // [const...]
 
     // load opcodes jump table into memory (0x0080..0x0280)
-    // a magic number: jmp_loc * magic = jmp_loc 16 times (packed)
-    0x00010001000100010001000100010001 dup1                             // [<0101>, <0101>, const...]
-    dup11                                                               // [0x80, <__0101>, <__0101>, const...]
-    shl                                                                 // [<0101__>, <__0101>, const...]
-    or                                                                  // [<magic>, const...]
+    // a magic number is: 0x00010001000100010001000100010001.0001000100010001.00010001.00010001
+    // the magic number is used to multiply jump location address:
+    //      jmp_loc * magic = jmp_loc x 16 times (packed)
+    0x00010001 dup1                                 // <____0101>, <____0101>, const...]
+    dup8 shl or dup1                                // <___0101>, <___0101>, const...]
+    dup9 shl or dup1                                // <__0101>, <__0101>, const...]
+    dup11 shl or                                    // <magic>, const...]
 
     // part.0: <process_eval_unsupported_code> x 1 time at beginning (0x00)
-    process_eval_unsupported_code dup2 mul                  // [<jmp_unsup_x16>, <magic>, const...]
-    dup11                                                   // [0x80, <jmp_unsup_x16>, <magic>, const...]
-    mstore                                                  // [<magic>, const...]
+    process_eval_unsupported_code dup2 mul          // [<jmp_unsup_x16>, <magic>, const...]
+    dup11                                           // [0x80, <jmp_unsup_x16>, <magic>, const...]
+    mstore                                          // [<magic>, const...]
 
     // part.1: <process_eval_opcode_01_80_push_const> x 128 times (total 0x100 bytes [8 words])
-    process_eval_opcode_01_80_push_const dup2 mul           // [<jmp01_80x16>, <magic>, ...]
-    dup1 0x82 mstore    dup1 0xA2 mstore                    // [<jmp01_80x16>, <magic>, ...]
-    dup1 0xC2 mstore    dup1 0xE2 mstore                    // [<jmp01_80x16>, <magic>, ...]
-    dup1 0x102 mstore   dup1 0x122 mstore                   // [<jmp01_80x16>, <magic>, ...]
-    dup1 0x142 mstore        0x162 mstore                   // [<magic>, ...]
+    process_eval_opcode_01_80_push_const dup2 mul   // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x82 mstore    dup1 0xA2 mstore            // [<jmp01_80x16>, <magic>, ...]
+    dup1 0xC2 mstore    dup1 0xE2 mstore            // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x102 mstore   dup1 0x122 mstore           // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x142 mstore        0x162 mstore           // [<magic>, ...]
 
     // part.1: <process_eval_opcode_81_9F_push_const> x 32' times (total 0x40 bytes [2 words])
     // NOTE: will write 1 byte more which will be rewritten later by [part.3]
-    process_eval_opcode_81_9F_push_const dup2 mul           // [<jmp01_80x16>, <magic>, ...]
-    dup1 0x182 mstore                                       // [<jmp01_80x16>, <magic>, ...]
-         0x1A2 mstore                                       // [<magic>, ...]
+    process_eval_opcode_81_9F_push_const dup2 mul   // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x182 mstore                               // [<jmp01_80x16>, <magic>, ...]
+         0x1A2 mstore                               // [<magic>, ...]
 
     // part.3: <process_eval_opcode_A0_BF_push_data> x 32 times (total 0x40 bytes [2 words])
-    process_eval_opcode_A0_BF_push_data mul                 // [<jmpA0_BFx16>, const...]
-    dup1 0x1C0 mstore                                       // [<jmpA0_BFx16>, const...]
-         0x1E0 mstore                                       // [const...]
+    process_eval_opcode_A0_BF_push_data mul         // [<jmpA0_BFx16>, const...]
+    dup1 0x1C0 mstore                               // [<jmpA0_BFx16>, const...]
+         0x1E0 mstore                               // [const...]
 
     // part.4: copy remaining locations from jump table
-    dup9                                                    // [0x80, const...]
-    __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy        // [const...]
+    dup9                                                // [0x80, const...]
+    __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy    // [const...]
 
     // push code_ptr and save at mem[0x40:0x60] (code_start_ptr)
     0x0500                                  // [<CP>, const...]
