@@ -1,0 +1,604 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025 Evgenii Kozlov [dsuchka@gmail.com]
+// Licensed under the Business Source License 1.1.
+
+// Usage is permitted for non-commercial purposes only, under the terms of BUSL-1.1.
+// Change Date: 2030-01-01
+// On the Change Date, this license will automatically convert to GPL-3.0-or-later,
+// granting full rights under the GNU General Public License.
+//
+// For more information, see https://github.com/mariadb/bsl
+//                           https://opensource.org/licenses/BUSL-1.1
+//                           https://spdx.org/licenses/BUSL-1.1.html
+//                           https://www.hashicorp.com/en/bsl
+
+
+#include "helper.huff"
+
+#define function eval() payable returns()
+#define function contract_name() view returns(string)
+#define function contract_version() view returns(string)
+
+#define macro CONSTRUCTOR() = takes(0) returns(0) {
+    caller  SAVE_OWNER()
+}
+
+#define macro MAIN() = takes(0) returns(0) {
+    // get selector (first 4 bytes) and check it against known functions
+    // NOTE: use simple if-else cascade since the count of functions is not so great
+
+    ZERO()  calldataload                // [<sel....>]
+    0xE0    shr                         // [<sel>]
+
+    // first check hot methods: "eval()"
+    dup1 __FUNC_SIG(eval) eq handle_eval jumpi
+
+    // then check empty call (when selector is empty, receive any value and return with no error)
+    calldatasize                        // [<sz>, <sel>]
+    other_selectors_check jumpi         // [<sel>]
+    stop                                // receive any value and return with no error
+
+    // otherwise check other methods
+other_selectors_check:
+    // Input stack:                     // [<sel>]
+    dup1 __FUNC_SIG(contract_name) eq handle_contract_name jumpi
+    dup1 __FUNC_SIG(contract_version) eq handle_contract_version jumpi
+
+    // delegate to implementation (if any)
+    LOAD_IMPLEMENTATION() dup1          // [<impl>, <impl>, <sel>]
+    delegate_to_implementation jumpi    // [<impl>, <sel>]
+
+    // do revert NoImplementation()
+    __FUNC_SIG(NoImplementation)        // [<__no_impl_err_sel>, ...]
+    do_revert_with_error_no_args jump
+
+delegate_to_implementation:
+    // Input stack:                     // [<impl>, ...]
+    DOUBLE_ZERO()                       // [0, 0, <impl>, ...]
+    calldatasize                        // [<sz>, 0, 0, <impl>, ...]
+    ZERO()                              // [0, <sz>, 0, 0, <impl>, ...]
+    calldatasize                        // [<sz>, 0, <sz>, 0, 0, <impl>, ...]
+    DOUBLE_ZERO()                       // (0, 0, <sz>) [0, <sz>, 0, 0, <impl>, ...]
+    calldatacopy                        // [0, <sz>, 0, 0, <impl>, ...]
+                                        // | mem[0:<sz>] = [calldata]
+    dup5                                // [<impl>, 0, <sz>, 0, 0, <impl>, ...]
+    gas                                 // (<gas>, <impl>, 0, <sz>, 0, 0) [<impl>, ...]
+    delegatecall                        // [<success>, <impl>, ...]
+    ZERO()                              // [0, <success>, <impl>, ...]
+    returndatasize                      // [<sz>, 0, <success>, <impl>, ...]
+    returndatasize                      // [<sz>, <sz>, 0, <success>, <impl>, ...]
+    DOUBLE_ZERO()                       // (0, 0, <sz>) [<sz>, 0, <success>, <impl>, ...]
+    returndatacopy                      // [<sz>, 0, <success>, <impl>, ...]
+    swap2                               // [<success>, 0, <sz>, <impl>, ...]
+    return_with_return_data jumpi       // [0, <sz>, <impl>, ...]
+    revert
+
+return_with_return_data:
+    return
+
+//  method "contract_name()"
+handle_contract_name:
+    // Input stack:                     // [<sel>]
+    PUSH_ARGS_FOR_RETURN_SHORT_MESSAGE(CONTRACT_NAME_STR, CONTRACT_NAME_LEN,
+        do_return_short_message)
+
+
+//  method "contract_version()"
+handle_contract_version:
+    // Input stack:                     // [<sel>]
+    PUSH_ARGS_FOR_RETURN_SHORT_MESSAGE(CONTRACT_VERSION_STR, CONTRACT_VERSION_LEN,
+        do_return_short_message)
+
+
+do_revert_forbidden:
+    __FUNC_SIG(Forbidden)
+    // fall down to <do_revert_with_error_no_args>
+
+do_revert_with_error_no_args:
+    REVERT_ERROR_NO_ARGS()
+
+do_return_short_message:
+    RETURN_SHORT_MESSAGE()
+
+//  method "eval()"
+handle_eval:
+    // Input stack:                     // [<sel>]
+    pop                                 // []
+    CHECK_CALLER_IS_OWNER_OR_SELF(process_eval, do_revert_forbidden)
+
+process_eval:
+    //  Memory layout:
+    //      0x0000              (???)               [1 word]
+    //      0x0020              (???)               [1 word]
+    //      0x0040              code start ptr      [1 word]
+    //      0x0060              invocation depth    [1 word]
+    //      0x0080..0x0280      opcodes jump table  [16 words]  (256 opcodes)
+    //      0x0280..0x0300      extended jump table [4 words]   (64 opcodes)
+    //      0x0300..0x0500      registers           [32 words]
+    //      0x0500..         -> code ptr (not adapted)
+
+
+    //  Main loop stack layout:
+    //  dup<n>  value       desc        (explained desc)
+    //  13      0x80        const       0x80
+    //  12      0x60        const       0x60
+    //  11      0x40        const       0x40
+    //  10      0x20        const       0x20
+    //  9       0x01        const       0x01
+    //  8       0x1F        const       (to trunc mod 2⁵ (5-bit value, 32 unique values))
+    //  7       0xF8        const       (to shift 31 bytes right)
+    //  6       0xFF        const       (to trunc mod 2⁸ (8-bit value, a byte))
+    //  5       0xFFFF      const       (to trunc mod 2¹⁶ (16-bit value, a jump location))
+    //  4       <SP>        stack_ptr   (points to the beggining of the stack)
+    //  3       <CE>        code_end    (points to the end of code)
+    //  2       <TOP>       top_ptr     (points to the next free word on the stack) [require: SP <= TOP]
+    //  1       <CP>        code_ptr    (points to the next opcode to be processed) [require: CP < CE]
+
+    //  In one row notation:                // [<CP>, <TOP>, <CE>, <SP>, const...]
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // push all the constants first
+    0x80 0x60 0x40 0x20 0x01 0x1F 0xF8 0xFF 0xFFFF                      // [const...]
+
+    // load opcodes jump table into memory (0x0080..0x0280)
+    // a magic number: jmp_loc * magic = jmp_loc 16 times (packed)
+    0x00010001000100010001000100010001 dup1                             // [<0101>, <0101>, const...]
+    dup11                                                               // [0x80, <__0101>, <__0101>, const...]
+    shl                                                                 // [<0101__>, <__0101>, const...]
+    or                                                                  // [<magic>, const...]
+
+    // part.0: <process_eval_unsupported_code> x 1 time at beginning (0x00)
+    process_eval_unsupported_code dup2 mul                  // [<jmp_unsup_x16>, <magic>, const...]
+    dup11                                                   // [0x80, <jmp_unsup_x16>, <magic>, const...]
+    mstore                                                  // [<magic>, const...]
+
+    // part.1: <process_eval_opcode_01_80_push_const> x 128 times (total 0x100 bytes [8 words])
+    process_eval_opcode_01_80_push_const dup2 mul           // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x82 mstore    dup1 0xA2 mstore                    // [<jmp01_80x16>, <magic>, ...]
+    dup1 0xC2 mstore    dup1 0xE2 mstore                    // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x102 mstore   dup1 0x122 mstore                   // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x142 mstore        0x162 mstore                   // [<magic>, ...]
+
+    // part.1: <process_eval_opcode_81_9F_push_const> x 32' times (total 0x40 bytes [2 words])
+    // NOTE: will write 1 byte more which will be rewritten later by [part.3]
+    process_eval_opcode_81_9F_push_const dup2 mul           // [<jmp01_80x16>, <magic>, ...]
+    dup1 0x182 mstore                                       // [<jmp01_80x16>, <magic>, ...]
+         0x1A2 mstore                                       // [<magic>, ...]
+
+    // part.3: <process_eval_opcode_A0_BF_push_data> x 32 times (total 0x40 bytes [2 words])
+    process_eval_opcode_A0_BF_push_data mul                 // [<jmpA0_BFx16>, const...]
+    dup1 0x1C0 mstore                                       // [<jmpA0_BFx16>, const...]
+         0x1E0 mstore                                       // [const...]
+
+    // part.4: copy remaining locations from jump table
+    dup9                                                    // [0x80, const...]
+    __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy        // [const...]
+
+    // push code_ptr and save at mem[0x40:0x60] (code_start_ptr)
+    0x0500                                  // [<CP>, const...]
+    dup1 dup9 mstore                        // [<CP>, const...]
+
+    // load code data (calldata after selector)
+    0x04 dup1                               // [4, 4, <CP>, const...]
+    calldatasize sub dup1                   // [<code_sz>, <code_sz>, 4, <CP>, const...]
+    swap2                                   // [4, <code_sz>, <code_sz>, <CP>, const...]
+    dup4                                    // (<CP>, 4, <code_sz>) [<code_sz>, <CP>, const...]
+    calldatacopy                            // [<code_sz>, <CP>, const...]
+
+    // evaluate code_end (<CE>)
+    dup2 add                                // [<CE>, <CP>, const...]
+
+    // evaluate stack_ptr (<SP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
+    dup6 dup2                               // [<CE>, 0x1F, <CE>, <CP>, const...]
+    dup2 add                                // [<CE+0x1F>, 0x1F, <CE>, <CP>, const...]
+    swap1 not                               // [<~0x1F>, <CE+0x1F>, <CE>, <CP>, const...]
+    and                                     // [<SP>, <CE>, <CP>, const...]
+
+    // evaluate top_ptr (starts from stack_ptr when stack is empty, i. e. TOP = SP)
+    dup1                                    // [<SP>, <TOP>, <CE>, <CP>, const...]
+    swap3                                   // [<CP>, <TOP>, <CE>, <SP>, const...]
+
+    // begin evaluation main loop
+    process_eval_main_loop jump
+
+process_eval_handle_next_opcode:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0xF8, 0x1F, 0x01, 0x20, 0x40, ...]
+    // advance code_ptr (<CP>): CP = CP+1
+    dup1                                // [<CP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 add                           // [<CP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap1                               // [<CP>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+
+    // NOTE: FROM HERE <CP'> (next CP) is normal <CP>
+
+    // load next opcode and do jump
+    // jump address is (mem[0x80+(opcode*2)-0x1E] => mem[0x62+(opcode*2)]) & 0xFFFF
+    mload                               // [<dirtyOP>, | <CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0xF8, ...]
+    dup8 shr                            // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1                                // [<OP>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup11                               // [1, <OP>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    shl                                 // [<OP*2>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    0x62 add                            // [<jmp_mem_addr>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    mload                               // [<dirty_jmp>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup7 and                            // [<jmp>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    jump                                // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+
+process_eval_opcode_F0_push_const:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop ZERO()                          // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_FF_push_const:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop ZERO() not                      // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_81_9F_push_const:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    // Formula: VALUE = 0x80 + (OP - 0x80)*0x20 = OP*0x20 - (0x20*0x80 - 0x80) = OP*0x20 - 0x0F80
+    dup11 mul                           // [<OP*0x20>, | ...]
+    0x0F80 swap1 sub                    // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_01_80_push_const:
+    // Input stack:                     // [<OP/VALUE>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup3                                // [<TOP>, <VALUE>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 add                           // [<TOP'>, <VALUE>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap3                               // [<TOP>, <VALUE>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    // fall down to <process_eval_main_loop>
+
+process_eval_main_loop:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_CODE_PTR_AND_HANDLE_NEXT(process_eval_handle_next_opcode)
+    // fall down to <process_eval_return_stack_data>
+
+process_eval_return_stack_data:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup4                                // [<SP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup3                                // [<TOP>, <SP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    sub                                 // [<sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5                                // (<stack_ptr>, <sz>), [...]
+    return
+
+process_eval_recheck_ptrs:
+    // Input stack:                     // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup3 sub                            // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1                                // [<TOP'>, <TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup6 gt                             // [(SP > TOP'), <TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jumpi
+                                        // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_code_ptr jump  // [<CP>, <TOP>, <CE>, <SP>, const...]
+
+process_eval_recheck_ptrs_revert_stack_underflow:
+    // StackUnderflow(uint256 underflowSize) when [adj_top_ptr < stack_ptr] (TOP' < SP)
+    // Input stack:                     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5 sub                            // [<SP - TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    __FUNC_SIG(StackUnderflow)          // [<__error_selector>, <arg1>, | ...]
+    // fall down to <do_revert_with_error_1_arg>
+
+do_revert_with_error_1_arg:
+    REVERT_ERROR_1_ARG()
+
+process_eval_opcode_A0_BF_push_data:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    // NOTE: data_sz (in bytes) = <OP> - 0x9F
+    0x9F swap1 sub                      // [<data_sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // do copy next N (data_sz) bytes from code onto stack as a word
+    dup2 dup2 add                       // [<CP'>, <data_sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2                               // [<CP>, <data_sz>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+    mload                               // [<dirty_data>, <data_sz>, | ...]
+    swap1                               // [<data_sz>, <dirty_data>, | ...]
+    dup12 sub                           // [<0x20-data_sz>, <dirty_data>, | ...]
+    0x03 shl                            // [<n_dirty_bits>, <dirty_data>, | ...]
+    shr                                 // [<VALUE>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+    dup3                                // [<TOP>, <VALUE>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+    dup12 add                           // [<TOP'>, <VALUE>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+    swap3                               // [<TOP>, <VALUE>, | <CP'>, <TOP'>, <CE>, <SP>, const...]
+    mstore                              // [<CP'>, <TOP'>, <CE>, <SP>, const...]
+    // fall down to <process_eval_recheck_code_ptr>
+
+process_eval_recheck_code_ptr:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup3 dup2 lt                        // [(CP < CE), | ...]
+    process_eval_handle_next_opcode jumpi
+    dup3 dup2 eq                        // [(CP == CE), | ...]
+    process_eval_return_stack_data jumpi
+
+    // OutOfCode(uint256 extraOffset) when (CP > CE)
+    dup3 dup2 sub                       // [(CP - CE), | ...]
+    __FUNC_SIG(OutOfCode)               // [<__error_selector>, <arg1>, | ...]
+    do_revert_with_error_1_arg jump
+
+
+process_eval_opcode_C0_add:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(add)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C1_sub:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(sub)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C2_mul:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(mul)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C3_div:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(div)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C4_sdiv:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(sdiv)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C5_mod:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(mod)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C6_smod:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(smod)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C7_exp:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_REVERSED(exp)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C8_neg:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_UNARY_OPCODE_BEGIN()       // [<stack[0]>, <(top-1)_ptr>, | ...]
+    ZERO() sub                          // [<VALUE>, <(top-1)_ptr>, | ...]
+    EVAL_UNARY_OPCODE_END()             // [<CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_C9_not:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_UNARY_OPCODE(not)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CA_and:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(and)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CB_or:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(or)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CC_xor:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(xor)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CD_shl:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(shl)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CE_shr:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(shr)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_CF_sar:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_BINARY_OPCODE_DIRECT(sar)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_D0_address:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop address                         // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D1_caller:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop caller                          // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D2_origin:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop origin                          // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D3_callvalue:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop callvalue                       // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D4_selfbalance:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop selfbalance                     // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D5_timestamp:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop timestamp                       // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D6_blocknumber:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop number                          // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D7_gasleft:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop gas                             // [<VALUE>, | ...]
+    process_eval_opcode_01_80_push_const jump
+
+process_eval_opcode_D8_balanceof:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_UNARY_OPCODE(balance)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_E8_rload:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    // NOTE: 0x18 * 0x20 = 0x300 (reg_ptr)
+    EVAL_UNARY_OPCODE_BEGIN()           // [<stack[0]>, <(top-1)_ptr>, | ...]
+    dup10 and                           // [<reg_idx>, <(top-1)_ptr>, | ...]
+    0x18 add                            // [<reg_idx+0x18>, <(top-1)_ptr>, | ...]
+    dup12 mul                           // [<reg_mem_ptr>, <(top-1)_ptr>, | ...]
+    mload                               // [<VALUE>, <(top-1)_ptr>, | ...]
+    EVAL_UNARY_OPCODE_END()             // [<CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_E9_rsave:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup3 mload                          // [<stack[-1]>, <TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    swap1                               // [<TOP>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup12 swap1 sub                     // [<(top-1)_ptr>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    mload                               // [<stack[0]>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup10 and                           // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    // NOTE: FROM HERE <(top-2)_ptr> is new TOP (<TOP'>)
+    0x18 add                            // [<reg_idx+0x18>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup12 mul                           // [<reg_mem_ptr>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_ZERO_SEU_AND_HANDLE_NEXT(process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_F1_iszero:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop EVAL_UNARY_OPCODE(iszero)
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_unsupported_code:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    __FUNC_SIG(UnsupportedCode)         // (<__error_selector>, <OP>), [...]
+    do_revert_with_error_1_arg jump
+
+debug_return_first_bytes:
+    0x1000 0x00 return
+
+}
+
+#define jumptable__packed OPCODES__JUMP_TABLE {
+//    process_eval_unsupported_code        // 0x00 is reserved, use 0xF0 to push zero
+//                                         process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    // 32 opcodes
+//
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    // 64 opcodes
+//
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    // 96 opcodes
+//
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
+//    // 128 opcodes (0x00..0x7F)
+//
+//    process_eval_opcode_01_80_push_const // 0x80 can be handled as is, same result, but less ops and cheaper
+//                                         process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const process_eval_opcode_81_9F_push_const
+//    // 32 opcodes (0x80..0x9F)  | total 160 opcodes
+//
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data process_eval_opcode_A0_BF_push_data
+//    // 32 opcodes (0xA0..0xBF)  | total 192 opcodes
+//
+    process_eval_opcode_C0_add  process_eval_opcode_C1_sub  process_eval_opcode_C2_mul  process_eval_opcode_C3_div
+    process_eval_opcode_C4_sdiv process_eval_opcode_C5_mod  process_eval_opcode_C6_smod process_eval_opcode_C7_exp
+    process_eval_opcode_C8_neg  process_eval_opcode_C9_not  process_eval_opcode_CA_and  process_eval_opcode_CB_or
+    process_eval_opcode_CC_xor  process_eval_opcode_CD_shl  process_eval_opcode_CE_shr  process_eval_opcode_CF_sar
+
+    process_eval_opcode_D0_address          process_eval_opcode_D1_caller
+    process_eval_opcode_D2_origin           process_eval_opcode_D3_callvalue
+    process_eval_opcode_D4_selfbalance      process_eval_opcode_D5_timestamp
+    process_eval_opcode_D6_blocknumber      process_eval_opcode_D7_gasleft
+
+    process_eval_opcode_D8_balanceof
+    process_eval_unsupported_code       // D9
+    process_eval_unsupported_code       // DA
+    process_eval_unsupported_code       // DB
+    process_eval_unsupported_code       // DC
+    process_eval_unsupported_code       // DD
+    process_eval_unsupported_code       // DE
+    process_eval_unsupported_code       // DF
+
+    process_eval_unsupported_code       // E0
+    process_eval_unsupported_code       // E1
+    process_eval_unsupported_code       // E2
+    process_eval_unsupported_code       // E3
+    process_eval_unsupported_code       // E4
+    process_eval_unsupported_code       // E5
+    process_eval_unsupported_code       // E6
+    process_eval_unsupported_code       // E7
+    process_eval_opcode_E8_rload        // E8
+    process_eval_opcode_E9_rsave        // E9
+    process_eval_unsupported_code       // EA
+    process_eval_unsupported_code       // EB
+    process_eval_unsupported_code       // EC
+    process_eval_unsupported_code       // ED
+    process_eval_unsupported_code       // EE
+    process_eval_unsupported_code       // EF
+
+    process_eval_opcode_F0_push_const   // F0
+    process_eval_opcode_F1_iszero       // F1
+    process_eval_unsupported_code       // F2
+    process_eval_unsupported_code       // F3
+    process_eval_unsupported_code       // F4
+    process_eval_unsupported_code       // F5
+    process_eval_unsupported_code       // F6
+    process_eval_unsupported_code       // F7
+    process_eval_unsupported_code       // F8
+    process_eval_unsupported_code       // F9
+    process_eval_unsupported_code       // FA
+    process_eval_unsupported_code       // FB
+    process_eval_unsupported_code       // FC
+    debug_return_first_bytes            // FD
+    process_eval_unsupported_code       // FE
+    process_eval_opcode_FF_push_const   // FF
+
+}
+

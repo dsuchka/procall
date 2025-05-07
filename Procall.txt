@@ -1,0 +1,125 @@
+// push constants
+    0x01..0x80      pushes constants 0x01..0x80     (pushConst)
+    0x81..0x9F      pushes constants 0xA0..0x460    (pushConstX32)
+    0xF0            pushes constant 0x00            (pushZero)
+    0xFF            pushes constant 0xFFF...FFF     (pushNegativeOne)
+
+// push data
+    0xA0..0xBF      pushes next [1..32] bytes (pushData)
+
+// math ops
+    0xC0        ADD     (stack[-1] = stack[-1] + stack[0])  [ pop 1 ]
+    0xC1        SUB     (stack[-1] = stack[-1] - stack[0])  [ pop 1 ]
+    0xC2        MUL     (stack[-1] = stack[-1] * stack[0])  [ pop 1 ]
+    0xC3        DIV     (stack[-1] = stack[-1] / stack[0])  [ pop 1 ]
+    0xC4        SDIV    (stack[-1] = stack[-1] /' stack[0]) [ pop 1 ]   *signed
+    0xC5        MOD     (stack[-1] = stack[-1] % stack[0])  [ pop 1 ]
+    0xC6        SMOD    (stack[-1] = stack[-1] %' stack[0]) [ pop 1 ]   *signed
+    0xC7        EXP     (stack[-1] = stack[-1] ** stack[0]) [ pop 1 ]
+    0xC8        NEG     (stack[0] = -stack[0])
+
+// bit ops
+    0xC9        NOT     (stack[0] = ~stack[0])
+    0xCA        AND     (stack[-1] = stack[-1] & stack[0])      [ pop 1 ]
+    0xCB        OR      (stack[-1] = stack[-1] | stack[0])      [ pop 1 ]
+    0xCC        XOR     (stack[-1] = stack[-1] ^ stack[0])      [ pop 1 ]
+    0xCD        SHL     (stack[-1] = stack[-1] << stack[0])     [ pop 1 ]
+    0xCE        SHR     (stack[-1] = stack[-1] >> stack[0])     [ pop 1 ]
+    0xCF        SAR     (stack[-1] = stack[-1] >>' stack[0])    [ pop 1 ]   *signed
+
+// runtime data ops
+    0xD0        ADDRESS     pushes current contract execution address (self)
+    0xD1        CALLER      pushes caller address (msg.sender)
+    0xD2        ORIGIN      pushes tx sender address (origin)
+    0xD3        CALLVALUE   pushes call value (msg.value)
+    0xD4        SELFBALANCE pushes balance of the current contract execution (self) address
+    0xD5        TIMESTAMP   pushes current block time stamp (epoch seconds)
+    0xD6        BLOCKNUMBER pushes current block number
+    0xD7        GASLEFT     pushes remaining gas value
+
+// blockchian ops
+    0xD8        BALANCEOF   (stack[0] = balance(address(stack[0])))
+
+// stack ops
+    0xD9        RWND        rewinds stack's top ptr: top_ptr = top_ptr - N (N in bytes) [ pop 1 ]   <size>
+    0xDA        DUP         pushes n'th stack element (N in words)                      [ pop 1 ]   <n>
+    0xDB        SWAP        swaps (stack[0]-2, stack[-1]-2) elements (words)            [ pop 2 ]   <n> <m>
+
+// storage ops
+    0xDC        SLOAD       (stack[0] = sload(stack[0]))
+    0xDD        SSTORE      (sstore(stack[-1], stack[0]))       [ pop 2 ]   <slot> <data>
+    0xDE        TLOAD       (stack[0] = tload(stack[0]))
+    0xDF        TSTORE      (tstore(stack[-1], stack[0]))       [ pop 2 ]   <slot> <data>
+
+
+    ** CALL_CODES **
+
+// execution (call) ops
+    0xE0        CALL            do normal call              [ pop 2 ]   <size> <addr>
+    0xE1        CALLCODE        do callcode call            [ pop 2 ]   <size> <addr>
+    0xE2        DELEGATECALL    do delegate call            [ pop 2 ]   <size> <addr>
+    0xE3        STATICCALL      do static call              [ pop 2 ]   <size> <addr>
+    0xE4        PRECOMPCALL     do call with no selector    [ pop 2 ]   <size> <addr>
+
+* NOTE: call_ptr points to a memory region of call data where first word consists of:
+    [128 bits call value (64-bit value is used for TRON)]
+    [32 bits gas limit (0 - auto)]
+    [64 bits token_id value (when calltoken exec)]
+    [32 bits selector (calldata starts from here)]
+  =>[vvvv.vvvv.vvvv.vvvv.(gggg).<tttt.tttt>.<ssss>][args...] ... | [<payload size>] [<call address>]
+     ^--- call value      ^gas   ^token_id   ^--- selector       ^--- top_ptr (after pop 2)
+     ^-------------------( payload size )------------------- ... --=--´
+
+
+// execution result management ops
+    0xE5        RETDATASZIE     pushes data size of last call result
+    0xE6        PUSHRETDATA     pushes (copies) return data onto stack          [ pop 2 ]   <from> <len>
+    0xE7        VERIFYCALL      checks last call code, reverts if unsuccess with return data
+
+
+    ** SYSTEM_CODES **
+
+// register ops
+    0xE8        RLOAD           (stack[0] = reg[stack[0]])
+    0xE9        RSAVE           (reg[stack[0]] = stack[-1])                     [ pop 2 ]   <data> <reg>
+
+// code evaluation ops
+    0xEA        FINISH          stop evaluation, return with stack data
+    0xEB        REVERT          stop evaluation, revert with stack data
+    0xEC        INVOKE          pushes next code address and jump to offset     [ pop 1 ]   <offset>
+    0xED        GOTO            go to code address                              [ pop 1 ]   <addr>
+    0xEE        DOIF            evaluate next code only if condition is true    [ pop 1 ]   <cond>
+    0xEF        DOIF_RWND       DOIF-else-RWND                                  [ pop 2 ]   <cond> <size>
+
+
+    ** SPECIAL_CODES **
+
+    (0xF0       PUSH0           pushZero)
+--
+    0xF1        ISZERO          (stack[0] = iszero(stack[0]))
+    0xF2        IIF             (stack[-2] = stack[0] ? stack[-1] : stack[-2])  [ pop 2 ]
+    0xF3        SHA3            pops a data region and pushes hash of the popped data:
+                                first, pop the size of the data                 [ pop 1 ]   <size>
+                                then, rewind for the size and push the hash     [ rewind ]
+
+    (0xF4..0xFC  reserved)
+
+    0xFD        debug
+    0xFE        extended codes prefix
+--
+    (0xFF is already defined for const -1)
+
+
+    ** EXTENDED_CODES **
+
+// other blockchain data ops
+    0x00        CHAINID     pushes current chain id
+    0x01        BASEFEE     pushes base fee value
+    0x02        GASPRICE    pushes gas price value
+    0x03        COINBASE    pushes current block mining beneficiary address
+    0x04        DIFFICULTY  pushes current block difficulty
+    0x05        GASLIMIT    pushes current block gas limit
+
+// Tron specific opcodes
+    0xE4        CALLTOKEN   do calltoken call           [ pop 2 ]   <size> <addr>
+

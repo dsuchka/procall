@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025 Evgenii Kozlov [dsuchka@gmail.com]
+// Licensed under the Business Source License 1.1.
+
+// Usage is permitted for non-commercial purposes only, under the terms of BUSL-1.1.
+// Change Date: 2030-01-01
+// On the Change Date, this license will automatically convert to GPL-3.0-or-later,
+// granting full rights under the GNU General Public License.
+//
+// For more information, see https://github.com/mariadb/bsl
+//                           https://opensource.org/licenses/BUSL-1.1
+//                           https://spdx.org/licenses/BUSL-1.1.html
+//                           https://www.hashicorp.com/en/bsl
+
+
+#include "basic.huff"
+
+// owner slot is always zero
+#define constant OWNER_SLOT = 0x00
+
+// keccak256('Procall::implementation')[:8]
+#define constant IMPLEMENTATION_SLOT = 0xb45b3ef5fc45be41
+
+// echo -n 'Procall' | xxd -p
+#define constant CONTRACT_NAME_STR = 0x50726f63616c6c
+#define constant CONTRACT_NAME_LEN = 0x7
+
+// echo -n '0.1.0' | xxd -p
+#define constant CONTRACT_VERSION_STR = 0x302e312e30
+#define constant CONTRACT_VERSION_LEN = 0x5
+
+
+#define error Forbidden()
+#define error NoImplementation()
+#define error StackUnderflow(uint256 underflowSize)
+#define error OutOfCode(uint256 extraOffset)
+#define error UnsupportedCode(uint256 opcode)
+
+#define macro LOAD_OWNER() = takes(0) returns(1) {
+    ZERO() sload
+}
+
+#define macro LOAD_IMPLEMENTATION() = takes(0) returns(1) {
+    [IMPLEMENTATION_SLOT] sload
+}
+
+#define macro SAVE_OWNER() = takes(1) returns(0) {
+    ZERO() sstore
+}
+
+#define macro SAVE_IMPLEMENTATION() = takes(1) returns(0) {
+    [IMPLEMENTATION_SLOT] sstore
+}
+

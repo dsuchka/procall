@@ -1,0 +1,17 @@
+#define macro TVM_CALLTOKEN() = takes(8) returns(1) {
+    // Input stack: [<(--gas--)>, <address>, <value>, <token_id>, <in_ptr>, <in_sz>, <out_ptr>, <out_sz>]
+    __VERBATIM(0xd0)
+}
+
+#define macro TVM_TOKENBALANCE() = takes(2) returns(1) {
+    // Input stack: [<token_id>, <address>]
+    __VERBATIM(0xd1)
+}
+
+#define macro TVM_CALLTOKENVALUE() = takes(0) returns(1) {
+    __VERBATIM(0xd2)
+}
+
+#define macro TVM_CALLTOKENID() = takes(0) returns(1) {
+    __VERBATIM(0xd3)
+}
