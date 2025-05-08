@@ -150,8 +150,8 @@ process_eval:
     dup9 shl or dup1                                // <__0101>, <__0101>, const...]
     dup11 shl or                                    // <magic>, const...]
 
-    // part.0: <process_eval_unsupported_code> x 1 time at beginning (0x00)
-    process_eval_unsupported_code dup2 mul          // [<jmp_unsup_x16>, <magic>, const...]
+    // part.0: <debug_return_first_4k_bytes> x 1 time at the beginning (0x00)
+    debug_return_first_4k_bytes dup2 mul            // [<jmp_debug_x16>, <magic>, const...]
     dup11                                           // [0x80, <jmp_unsup_x16>, <magic>, const...]
     mstore                                          // [<magic>, const...]
 
@@ -481,13 +481,18 @@ process_eval_unsupported_code:
     __FUNC_SIG(UnsupportedCode)         // (<__error_selector>, <OP>), [...]
     do_revert_with_error_1_arg jump
 
-debug_return_first_bytes:
-    0x1000 0x00 return
+debug_return_first_4k_bytes:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    0x1000 ZERO() return
+
+debug_return_first_bytes_till_top:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup3 ZERO() return
 
 }
 
 #define jumptable__packed OPCODES__JUMP_TABLE {
-//    process_eval_unsupported_code        // 0x00 is reserved, use 0xF0 to push zero
+//    debug_return_first_4k_bytes          // 0x00 is reserved, use 0xF0 to push zero
 //                                         process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
 //    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
 //    process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const process_eval_opcode_01_80_push_const
@@ -598,7 +603,7 @@ debug_return_first_bytes:
     process_eval_unsupported_code       // FA
     process_eval_unsupported_code       // FB
     process_eval_unsupported_code       // FC
-    debug_return_first_bytes            // FD
+    debug_return_first_bytes_till_top   // FD
     process_eval_unsupported_code       // FE
     process_eval_opcode_FF_push_const   // FF
 
