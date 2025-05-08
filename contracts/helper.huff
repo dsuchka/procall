@@ -62,7 +62,7 @@
 
 #define macro CHECK_CODE_PTR_AND_HANDLE_NEXT(handle_next_label) = takes(13) returns(13) {
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup3 dup2 lt                    // [(CP < CE), | ...]
+    dup3 dup2 slt                   // [(CP < CE), | ...]
     <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
 }
 
@@ -75,8 +75,8 @@
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
     <stack_extra_usage>             // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup3 sub                        // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup5 gt iszero                  // [(SP <= TOP'), | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup4 dup3 lt                    // [(CP < CE), (SP <= TOP'), | ...]
+    dup5 sgt iszero                 // [(SP <= TOP'), | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup4 dup3 slt                   // [(CP < CE), (SP <= TOP'), | ...]
     and                             // [<ptrs_is_ok>, ...]
     <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
     <stack_extra_usage>             // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -85,8 +85,8 @@
 
 #define macro CHECK_PTRS_ZERO_SEU_AND_HANDLE_NEXT(handle_next_label, recheck_label) = takes(10) returns(10) {
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup2 dup5 gt iszero             // [(SP <= TOP), | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup4 dup3 lt                    // [(CP < CE), (SP <= TOP), | ...]
+    dup2 dup5 sgt iszero            // [(SP <= TOP), | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup4 dup3 slt                   // [(CP < CE), (SP <= TOP), | ...]
     and                             // [<ptrs_is_ok>, ...]
     <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
     ZERO()                          // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]

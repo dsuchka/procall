@@ -268,7 +268,7 @@ process_eval_recheck_ptrs:
     // Input stack:                     // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup3 sub                            // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup1                                // [<TOP'>, <TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup6 gt                             // [(SP > TOP'), <TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup6 sgt                            // [(SP > TOP'), <TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
     process_eval_recheck_ptrs_revert_stack_underflow jumpi
                                         // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
     pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -305,7 +305,7 @@ process_eval_opcode_A0_BF_push_data:
 
 process_eval_recheck_code_ptr:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup3 dup2 lt                        // [(CP < CE), | ...]
+    dup3 dup2 slt                       // [(CP < CE), | ...]
     process_eval_handle_next_opcode jumpi
     dup3 dup2 eq                        // [(CP == CE), | ...]
     process_eval_return_stack_data jumpi
