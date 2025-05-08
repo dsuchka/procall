@@ -443,6 +443,17 @@ process_eval_opcode_D8_balanceof:
     pop EVAL_UNARY_OPCODE(balance)
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
 
+process_eval_opcode_D9_pop:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    // fall down to <process_eval_update_top_zero_seu>
+
+process_eval_update_top_zero_seu:
+    // Input stack:                     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2 pop                           // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_ZERO_SEU_AND_HANDLE_NEXT(process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
 process_eval_opcode_E8_rload:
     // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -493,6 +504,15 @@ process_eval_opcode_F2_iff:
 process_eval_opcode_F2_iff_continue_unchanged:
     // Input stack:                     // [<CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_F4_rewind:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 mul                           // [<n*0x20>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap1 sub                           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_update_top_zero_seu jump
 
 process_eval_unsupported_code:
     // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -581,9 +601,9 @@ debug_return_first_bytes_till_top:
     process_eval_opcode_D2_origin           process_eval_opcode_D3_callvalue
     process_eval_opcode_D4_selfbalance      process_eval_opcode_D5_timestamp
     process_eval_opcode_D6_blocknumber      process_eval_opcode_D7_gasleft
-
     process_eval_opcode_D8_balanceof
-    process_eval_unsupported_code       // D9
+
+    process_eval_opcode_D9_pop
     process_eval_unsupported_code       // DA
     process_eval_unsupported_code       // DB
     process_eval_unsupported_code       // DC
@@ -612,7 +632,7 @@ debug_return_first_bytes_till_top:
     process_eval_opcode_F1_iszero
     process_eval_opcode_F2_iff
     process_eval_unsupported_code       // F3
-    process_eval_unsupported_code       // F4
+    process_eval_opcode_F4_rewind
     process_eval_unsupported_code       // F5
     process_eval_unsupported_code       // F6
     process_eval_unsupported_code       // F7
