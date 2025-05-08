@@ -125,8 +125,8 @@ process_eval:
     //  11      0x40        const       0x40
     //  10      0x20        const       0x20
     //  9       0x01        const       0x01
-    //  8       0x1F        const       (to trunc mod 2⁵ (5-bit value, 32 unique values))
-    //  7       0xF8        const       (to shift 31 bytes right)
+    //  8       0x0F        const       (to trunc mod 2⁴ (4-bit value, 16 unique values))
+    //  7       0x1F        const       (to trunc mod 2⁵ (5-bit value, 32 unique values))
     //  6       0xFF        const       (to trunc mod 2⁸ (8-bit value, a byte))
     //  5       0xFFFF      const       (to trunc mod 2¹⁶ (16-bit value, a jump location))
     //  4       <SP>        stack_ptr   (points to the beggining of the stack) [ActorVM-stack]
@@ -139,7 +139,7 @@ process_eval:
     ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // push all the constants first
-    0x80 0x60 0x40 0x20 0x01 0x1F 0xF8 0xFF 0xFFFF  // [const...]
+    0x80 0x60 0x40 0x20 0x01 0x0F 0x1F 0xFF 0xFFFF  // [const...]
 
     // load opcodes jump table into memory (0x0080..0x0280)
     // a magic number is: 0x00010001000100010001000100010001.0001000100010001.00010001.00010001
@@ -192,7 +192,7 @@ process_eval:
     dup2 add                                // [<CE>, <CP>, const...]
 
     // evaluate stack_ptr (<SP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
-    dup6 dup2                               // [<CE>, 0x1F, <CE>, <CP>, const...]
+    dup5 dup2                               // [<CE>, 0x1F, <CE>, <CP>, const...]
     dup2 add                                // [<CE+0x1F>, 0x1F, <CE>, <CP>, const...]
     swap1 not                               // [<~0x1F>, <CE+0x1F>, <CE>, <CP>, const...]
     and                                     // [<SP>, <CE>, <CP>, const...]
@@ -205,7 +205,7 @@ process_eval:
     process_eval_main_loop jump
 
 process_eval_handle_next_opcode:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0xF8, 0x1F, 0x01, 0x20, 0x40, ...]
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0x1F, 0x0F, 0x01, 0x20, 0x40, ...]
     // advance code_ptr (<CP>): CP = CP+1
     dup1                                // [<CP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup10 add                           // [<CP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -215,8 +215,8 @@ process_eval_handle_next_opcode:
 
     // load next opcode and do jump
     // jump address is (mem[0x80+(opcode*2)-0x1E] => mem[0x62+(opcode*2)]) & 0xFFFF
-    mload                               // [<dirtyOP>, | <CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0xF8, ...]
-    dup8 shr                            // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    mload                               // [<dirtyOP>, | <CP>, <TOP>, <CE>, <SP>, 0xFFFF, 0xFF, 0x1F, 0x0F, const...]
+    ZERO() byte                         // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup1                                // [<OP>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup11                               // [1, <OP>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     shl                                 // [<OP*2>, <OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -459,7 +459,7 @@ process_eval_opcode_E8_rload:
     pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
     // NOTE: 0x18 * 0x20 = 0x300 (reg_ptr)
     EVAL_UNARY_OPCODE_BEGIN()           // [<stack[0]>, <(top-1)_ptr>, | ...]
-    dup10 and                           // [<reg_idx>, <(top-1)_ptr>, | ...]
+    dup9 and                            // [<reg_idx>, <(top-1)_ptr>, | ...]
     0x18 add                            // [<reg_idx+0x18>, <(top-1)_ptr>, | ...]
     dup12 mul                           // [<reg_mem_ptr>, <(top-1)_ptr>, | ...]
     mload                               // [<VALUE>, <(top-1)_ptr>, | ...]
@@ -475,7 +475,7 @@ process_eval_opcode_E9_rsave:
     swap1                               // [<TOP>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup12 swap1 sub                     // [<(top-1)_ptr>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     mload                               // [<stack[0]>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup10 and                           // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup9 and                            // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     // NOTE: FROM HERE <(top-2)_ptr> is new TOP (<TOP'>)
     0x18 add                            // [<reg_idx+0x18>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     dup12 mul                           // [<reg_mem_ptr>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
