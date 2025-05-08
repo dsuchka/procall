@@ -476,6 +476,24 @@ process_eval_opcode_F1_iszero:
     pop EVAL_UNARY_OPCODE(iszero)
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
 
+process_eval_opcode_F2_iff:
+    // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    pop                                 // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup11 swap1 sub                     // [<(top-1)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    mload iszero                        // [<!(stack[0])>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    process_eval_opcode_F2_iff_continue_unchanged jumpi
+
+    // Input stack:                     // [<CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup2 mload                          // [<stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup11 dup4 sub                      // [<(top-3)_ptr>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
+
+process_eval_opcode_F2_iff_continue_unchanged:
+    // Input stack:                     // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
 process_eval_unsupported_code:
     // Input stack:                     // [<OP>, | <CP>, <TOP>, <CE>, <SP>, const...]
     __FUNC_SIG(UnsupportedCode)         // (<__error_selector>, <OP>), [...]
@@ -581,8 +599,8 @@ debug_return_first_bytes_till_top:
     process_eval_unsupported_code       // E5
     process_eval_unsupported_code       // E6
     process_eval_unsupported_code       // E7
-    process_eval_opcode_E8_rload        // E8
-    process_eval_opcode_E9_rsave        // E9
+    process_eval_opcode_E8_rload
+    process_eval_opcode_E9_rsave
     process_eval_unsupported_code       // EA
     process_eval_unsupported_code       // EB
     process_eval_unsupported_code       // EC
@@ -590,9 +608,9 @@ debug_return_first_bytes_till_top:
     process_eval_unsupported_code       // EE
     process_eval_unsupported_code       // EF
 
-    process_eval_opcode_F0_push_const   // F0
-    process_eval_opcode_F1_iszero       // F1
-    process_eval_unsupported_code       // F2
+    process_eval_opcode_F0_push_const
+    process_eval_opcode_F1_iszero
+    process_eval_opcode_F2_iff
     process_eval_unsupported_code       // F3
     process_eval_unsupported_code       // F4
     process_eval_unsupported_code       // F5
@@ -605,7 +623,7 @@ debug_return_first_bytes_till_top:
     process_eval_unsupported_code       // FC
     debug_return_first_bytes_till_top   // FD
     process_eval_unsupported_code       // FE
-    process_eval_opcode_FF_push_const   // FF
+    process_eval_opcode_FF_push_const
 
 }
 
