@@ -114,8 +114,8 @@ process_eval:
     //      0x0060              invocation depth    [1 word]
     //      0x0080..0x0280      opcodes jump table  [16 words]  (256 opcodes)
     //      0x0280..0x0300      extended jump table [4 words]   (64 opcodes)
-    //      0x0300..0x0500      registers           [32 words]
-    //      0x0500..         -> code ptr
+    //      0x0300..0x0700      registers           [32 words]
+    //      0x0700..         -> code ptr
 
 
     //  Main loop EVM-stack layout:
@@ -178,7 +178,7 @@ process_eval:
     __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy    // [const...]
 
     // push code_ptr and save at mem[0x40:0x60] (code_start_ptr)
-    0x0500                                  // [<CP>, const...]
+    0x0700                                  // [<CP>, const...]
     dup1 dup9 mstore                        // [<CP>, const...]
 
     // load code data (calldata after selector)
