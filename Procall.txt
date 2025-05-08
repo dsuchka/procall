@@ -1,4 +1,6 @@
 // push constants
+    0x00            debug (return mem from 0x0 to 0x1000 address, first 4kb)
+--
     0x01..0x80      pushes constants 0x01..0x80     (pushConst)
     0x81..0x9F      pushes constants 0xA0..0x460    (pushConstX32)
     0xF0            pushes constant 0x00            (pushZero)
@@ -92,7 +94,7 @@
 
     ** SPECIAL_CODES **
 
-    (0xF0       PUSH0       pushZero)
+    (0xF0       PUSH0       pushes constant zero)
 --
     0xF1        ISZERO      (stack[0] = iszero(stack[0]))
     0xF2        IIF         (stack[-2] = stack[0] ? stack[-1] : stack[-2])              [ pop 2 ]
@@ -103,10 +105,10 @@
 
     (0xF5..0xFC  reserved)
 
-    0xFD        debug
+    0xFD        debug (till top)
     0xFE        extended codes prefix
 --
-    (0xFF is already defined for const -1)
+    (0xFF       PUSHNEGONE  pushes constant -1 (negative one))
 
 
     ** EXTENDED_CODES **

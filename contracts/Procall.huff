@@ -515,7 +515,6 @@ process_eval_opcode_F4_rewind:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup12 mul                           // [<n*0x20>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     swap1 sub                           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
     process_eval_update_top_zero_seu jump
 
