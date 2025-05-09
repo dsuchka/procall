@@ -662,11 +662,11 @@ process_eval_unsupported_code:
 
 debug_return_first_4k_bytes:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    0x1000 ZERO() return
+    0x1000 ZERO() revert
 
-debug_return_first_bytes_till_top:
+process_eval_opcode_FD_debug:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup2 ZERO() return
+    dup2 ZERO() revert
 
 }
 
@@ -782,7 +782,7 @@ debug_return_first_bytes_till_top:
     process_eval_opcode_FA_invoke_next
     process_eval_unsupported_code       // FB
     process_eval_unsupported_code       // FC
-    debug_return_first_bytes_till_top   // FD
+    process_eval_opcode_FD_debug
     process_eval_unsupported_code       // FE
     process_eval_opcode_FF_push_const
 
