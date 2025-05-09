@@ -1,13 +1,13 @@
 // push constants
     0x00            debug (return mem from 0x0 to 0x1000 address, first 4kb)
 --
-    0x01..0x80      pushes constants 0x01..0x80     (pushConst)
-    0x81..0x9F      pushes constants 0xA0..0x460    (pushConstX32)
-    0xF0            pushes constant 0x00            (pushZero)
-    0xFF            pushes constant 0xFFF...FFF     (pushNegativeOne)
+    0x01..0x80      push constants 0x01..0x80   (pushConst)
+    0x81..0x9F      push constants 0xA0..0x460  (pushConstX32)
+    0xF0            push constant 0x00          (pushZero)
+    0xFF            push constant 0xFFF...FFF   (pushNegativeOne)
 
 // push data
-    0xA0..0xBF      pushes next [1..32] bytes (pushData)
+    0xA0..0xBF      push next [1..32] bytes (pushData)
 
 // math ops
     0xC0        ADD     (stack[-1] = stack[-1] + stack[0])  [ pop 1 ]
@@ -30,20 +30,20 @@
     0xCF        SAR     (stack[-1] = stack[-1] >>' stack[0])    [ pop 1 ]   *signed
 
 // runtime blockchain data ops
-    0xD0        ADDRESS     pushes current contract execution address (self)
-    0xD1        CALLER      pushes caller address (msg.sender)
-    0xD2        ORIGIN      pushes tx sender address (origin)
-    0xD3        CALLVALUE   pushes call value (msg.value)
-    0xD4        SELFBALANCE pushes balance of the current contract execution (self) address
-    0xD5        TIMESTAMP   pushes current block time stamp (epoch seconds)
-    0xD6        BLOCKNUMBER pushes current block number
-    0xD7        GASLEFT     pushes remaining gas value
+    0xD0        ADDRESS     push current contract execution address (self)
+    0xD1        CALLER      push caller address (msg.sender)
+    0xD2        ORIGIN      push tx sender address (origin)
+    0xD3        CALLVALUE   push call value (msg.value)
+    0xD4        SELFBALANCE push balance of the current contract execution (self) address
+    0xD5        TIMESTAMP   push current block time stamp (epoch seconds)
+    0xD6        BLOCKNUMBER push current block number
+    0xD7        GASLEFT     push remaining gas value
     0xD8        BALANCEOF   (stack[0] = balance(address(stack[0])))
 
 // stack ops
-    0xD9        POP         pops 1 stack element                                        [ pop 1 ]   <?>
-    0xDA        DUP         pushes n'th stack element (N in words)                      [ pop 1 ]   <n>
-    0xDB        SWAP        swaps (stack[0]-2, stack[-1]-2) elements (words)            [ pop 2 ]   <n> <m>
+    0xD9        POP         pop 1 stack element                                 [ pop 1 ]   <?>
+    0xDA        DUP         push n'th stack element (N in words)                [ pop 1 ]   <n>
+    0xDB        SWAP        swap (stack[0]-2, stack[-1]-2) elements (words)     [ pop 2 ]   <n> <m>
 
 // storage ops
     0xDC        SLOAD       (stack[0] = sload(stack[0]))
@@ -72,9 +72,9 @@
 
 
 // execution result management ops
-    0xE5        RETDATASZIE     pushes data size of last call result
-    0xE6        PUSHRETDATA     pushes (copies) return data onto stack          [ pop 2 ]   <from> <len>
-    0xE7        VERIFYCALL      checks last call code, reverts if unsuccess with return data
+    0xE5        RETDATASZIE     push data size of last call result
+    0xE6        PUSHRETDATA     push (copies) return data onto stack        [ pop 2 ]   <from> <len>
+    0xE7        VERIFYCALL      check last call code, reverts if unsuccess with return data
 
 
     ** SYSTEM_CODES **
@@ -114,12 +114,12 @@
     ** EXTENDED_CODES **
 
 // other blockchain data ops
-    0x00        CHAINID     pushes current chain id
-    0x01        BASEFEE     pushes base fee value
-    0x02        GASPRICE    pushes gas price value
-    0x03        COINBASE    pushes current block mining beneficiary address
-    0x04        DIFFICULTY  pushes current block difficulty
-    0x05        GASLIMIT    pushes current block gas limit
+    0x00        CHAINID     push current chain id
+    0x01        BASEFEE     push base fee value
+    0x02        GASPRICE    push gas price value
+    0x03        COINBASE    push current block mining beneficiary address
+    0x04        DIFFICULTY  push current block difficulty
+    0x05        GASLIMIT    push current block gas limit
 
 // Tron specific opcodes
     0xE4        CALLTOKEN   do calltoken call           [ pop 2 ]   <size> <addr>
