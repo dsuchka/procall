@@ -530,7 +530,7 @@ debug_return_first_4k_bytes:
 
 debug_return_first_bytes_till_top:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup3 ZERO() return
+    dup2 ZERO() return
 
 }
 
