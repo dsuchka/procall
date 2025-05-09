@@ -84,31 +84,50 @@
     0xE9        RSAVE       (reg[stack[0]] = stack[-1])                     [ pop 2 ]   <data> <reg>
 
 // code evaluation ops
-    0xEA        FINISH      stop evaluation, return with stack data
-    0xEB        REVERT      stop evaluation, revert with stack data
-    0xEC        INVOKE      pushes next code address and jump to offset     [ pop 1 ]   <offset>
-    0xED        GOTO        go to code address                              [ pop 1 ]   <addr>
-    0xEE        DOIF        evaluate next code only if condition is true    [ pop 1 ]   <cond>
-    0xEF        DOIF_RWND   DOIF-else-RWND                                  [ pop 2 ]   <cond> <size>
-
+    0xEA        FINISH      stop evaluation, return with the full stack data
+    0xEB        REVERT      stop evaluation, revert with the full stack data
+    0xEC        FINISH_N    stop evaluation, return with n last bytes of the stack
+    0xED        REVERT_N    stop evaluation, revert with n last bytes of the stack
+    0xEE        REWIND_N    rewind stack's top ptr:
+                                top_ptr = top_ptr - N (N in bytes)          [ pop 0x20+n (bytes) ] <n> <...>
+    0xEF        TOP_PTR     push current top_ptr (points to the value itself)
 
     ** SPECIAL_CODES **
 
-    (0xF0       PUSH0       pushes constant zero)
---
-    0xF1        ISZERO      (stack[0] = iszero(stack[0]))
-    0xF2        IIF         (stack[-2] = stack[0] ? stack[-1] : stack[-2])              [ pop 2 ]
-    0xF3        SHA3        pops a data region and pushes hash of the popped data:
-                                first, pop the size of the data                         [ pop 1 ]   <size>
-                                then, rewind for the size and push the hash             [ rewind ]
-    0xF4        RWND        rewinds stack's top ptr: top_ptr = top_ptr - N (N in bytes) [ pop 1+n ] <n> <...>
+// constants 0 and -1
+    0xF0        PUSH0       push constant zero
+    0xFF        PUSHNEGONE  push constant -1 (negative one)
 
-    (0xF5..0xFC  reserved)
+// boolean ops
+    0xF1        ISZERO      (stack[0] = iszero(stack[0]))
+    0xF2        LT          (stack[-1] = stack[-1] < stack[0])              [ pop 1 ]
+    0xF2        GT          (stack[-1] = stack[-1] > stack[0])              [ pop 1 ]
+    0xF3        SLT         (stack[-1] = stack[-1] <' stack[0])             [ pop 1 ]   *signed
+    0xF4        SGT         (stack[-1] = stack[-1] >' stack[0])             [ pop 1 ]   *signed
+    0xF5        IIF         (stack[-2] = stack[0] ? stack[-1] : stack[-2])  [ pop 2 ]
+
+// conditional ops
+    0xF6        DOIF        evaluate next code only if condition is true    [ pop 1 ]   <cond>
+    0xF7        DOIF_REWIND DOIF-else-REWIND                                [ pop 2 ]   <cond> <size>
+
+// invocation ops
+    0xF8        GOTO        go to code address (return from an invocation)          [ pop 1 ]   <addr>
+    0xF9        INVOKETHIS  push next code address and jump within current code     [ pop 1 ]   <offset>
+    0xFA        INVOKENEXT  push operating data, alloc new registers, update ptrs
+                                and jump to a new code on the stack                 [ pop 2 ]   <code_sz> <data_sz>
+                            NOTE: to return from the invocation the FINISH/REVERT
+                                opcodes can be used
+
+// other ops
+    0xFB        SHA3    pop a data region and push hash of the popped data:
+                            first, pop the size of the data                         [ pop 1 ]   <size>
+                            then, rewind for the size and push the hash             [ rewind ]
+
+    (0xFC  reserved)
 
     0xFD        debug (till top)
     0xFE        extended codes prefix
 --
-    (0xFF       PUSHNEGONE  pushes constant -1 (negative one))
 
 
     ** EXTENDED_CODES **

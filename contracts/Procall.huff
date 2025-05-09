@@ -109,13 +109,29 @@ process_eval:
     //  Memory layout:
     //      0x0000              (???)               [1 word]
     //      0x0020              (???)               [1 word]
-    //      0x0040              code start ptr      [1 word]
-    //      0x0060              invocation depth    [1 word]
+    //      0x0040              <reg_ptr>           [1 word]
+    //      0x0060              <frame_state>       [1 word: 4 × uint64]
     //      0x0080..0x0280      opcodes jump table  [16 words]  (256 opcodes)
     //      0x0280..0x0300      extended jump table [4 words]   (64 opcodes)
-    //      0x0300..0x0700      registers           [32 words]
-    //      0x0700..         -> code ptr
 
+
+    //  Frame state word consists of:
+    //      [<mem_start> <mem_end> <depth> <code_start>]        (uint64 each)
+
+    //  Previous frame descriptor consists of 2 words:
+    //  #1. [<frame state>]
+    //  #2. [<reg_ptr> <stack_ptr> <00..00> <code_end>]          (uint64 each)
+
+    //  INVOKENEXT (deep invocation) mechanism:
+    //
+    //  Arguments on stack:  ... | [code bytes] [payload bytes] || <code_sz> <data_sz>
+    //                             ^--code_sz-| ^-- data_sz --|    (pop 2 args)
+    //                             ^--ret_ptr
+    //
+    //  Push frame data on stack and allocate new registers:
+    //      ... | [code bytes] [payload bytes] || <prev_frame_desc> [registers] | =>
+    //            ^--ret_ptr   ^-- mem_ptr        (0x20-aligned)    ^--reg_ptr    ^-- new SP and top
+    //
 
     //  Main loop EVM-stack layout:
     //  dup<n>  value       desc        (explained desc)
@@ -177,9 +193,16 @@ process_eval:
     dup9                                                // [0x80, const...]
     __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy    // [const...]
 
-    // push code_ptr and save at mem[0x40:0x60] (code_start_ptr)
-    0x0700                                  // [<CP>, const...]
-    dup1 dup9 mstore                        // [<CP>, const...]
+    // Frame:
+    //  [system data] | [code] [regs] |
+    //  (0x300 bytes) ^-- Frame       ^-- SP/top_ptr
+    //
+
+    // push code_ptr and save it at mem[0x60:0x80] (<frame_state>)
+    0x0300                                  // [<CP>, const...]
+    dup1 dup10 mstore                       // [<CP>, const...]
+    // NOTE: frame state is packed 4 × uint64, the value is <code_ptr>
+    //       (mem ptrs and depth are zero)
 
     // load code data (calldata after selector)
     0x04 dup1                               // [4, 4, <CP>, const...]
@@ -191,11 +214,18 @@ process_eval:
     // evaluate code_end (<CE>)
     dup2 add                                // [<CE>, <CP>, const...]
 
-    // evaluate stack_ptr (<SP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
+    // evaluate reg_ptr (<RP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
     dup5 dup2                               // [<CE>, 0x1F, <CE>, <CP>, const...]
     dup2 add                                // [<CE+0x1F>, 0x1F, <CE>, <CP>, const...]
     swap1 not                               // [<~0x1F>, <CE+0x1F>, <CE>, <CP>, const...]
-    and                                     // [<SP>, <CE>, <CP>, const...]
+    and                                     // [<RP>, <CE>, <CP>, const...]
+
+    // store it: mem[0x40:0x60] = <reg_ptr>
+    dup1                                    // [<RP>, <RP>, <CE>, <CP>, const...]
+    dup11 mstore                            // [<RP>, <CE>, <CP>, const...]
+
+    // evaluate stack_ptr (<SP>): reg_ptr + 0x400
+    0x0400 add                              // [<SP>, <CE>, <CP>, const...]
 
     // evaluate top_ptr (starts from stack_ptr when stack is empty, i. e. TOP = SP)
     dup1                                    // [<SP>, <TOP>, <CE>, <CP>, const...]
@@ -465,11 +495,11 @@ process_eval_update_top_zero_seu:
 
 process_eval_opcode_E8_rload:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    // NOTE: 0x18 * 0x20 = 0x300 (reg_ptr)
     EVAL_UNARY_OPCODE_BEGIN()           // [<stack[0]>, <(top-1)_ptr>, | ...]
     dup9 and                            // [<reg_idx>, <(top-1)_ptr>, | ...]
-    0x18 add                            // [<reg_idx+0x18>, <(top-1)_ptr>, | ...]
-    dup12 mul                           // [<reg_mem_ptr>, <(top-1)_ptr>, | ...]
+    dup12 mul                           // [<reg_idx*0x20>, <(top-1)_ptr>, | ...]
+    dup13 mload                         // [<reg_ptr>, <reg_idx*0x20>, <(top-1)_ptr>, | ...]
+    add                                 // [<reg_pos>, <(top-1)_ptr>, | ...]
     mload                               // [<VALUE>, <(top-1)_ptr>, | ...]
     EVAL_UNARY_OPCODE_END()             // [<CP>, <TOP>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
@@ -483,40 +513,146 @@ process_eval_opcode_E9_rsave:
     dup12 swap1 sub                     // [<(top-1)_ptr>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     mload                               // [<stack[0]>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup9 and                            // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup12 mul                           // [<reg_idx*0x20>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup13 mload                         // [<reg_ptr>, <reg_idx*0x20>, <stack[-1]>, | ...]
+    add                                 // [<reg_pos>, <stack[-1]>, | ...]
+
     // NOTE: FROM HERE <(top-2)_ptr> is new TOP (<TOP'>)
-    0x18 add                            // [<reg_idx+0x18>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
-    dup12 mul                           // [<reg_mem_ptr>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_ZERO_SEU_AND_HANDLE_NEXT(process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+process_eval_opcode_EE_rewind:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap1 sub                           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_update_top_zero_seu jump
 
 process_eval_opcode_F1_iszero:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_UNARY_OPCODE(iszero)
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
 
-process_eval_opcode_F2_iff:
+process_eval_opcode_F5_iif:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup11 swap1 sub                     // [<(top-1)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     mload iszero                        // [<!(stack[0])>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    process_eval_opcode_F2_iff_continue_unchanged jumpi
+    process_eval_opcode_F5_iif_continue_unchanged jumpi
 
     // Input stack:                     // [<CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup2 mload                          // [<stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup11 dup4 sub                      // [<(top-3)_ptr>, <stack[-1]>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
 
-process_eval_opcode_F2_iff_continue_unchanged:
+process_eval_opcode_F5_iif_continue_unchanged:
     // Input stack:                     // [<CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
 
-process_eval_opcode_F4_rewind:
+
+//
+//  ** INVOCATION HANDLERS **
+//
+
+process_eval_opcode_FA_invoke_next:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    swap1 sub                           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    process_eval_update_top_zero_seu jump
+    // AVM-Stack args:                  // [...] | [<code_sz> <data_sz>] |
+    //                                  //          stack[-1] stack[0]
+    //                                  //          ^-(top-2) ^-(top-1)  ^-(TOP)
+    //                                  //          ^-(TOP')
+
+    // re-copy consts (stack too deep) and make uint64 mask (U64M) (0xFFFF_FFFF_FFFF_FFFF)
+    dup13 dup13 dup13 dup13 dup13       // [0x01, 0x20, 0x40, 0x60, 0x80, | <CP>, <TOP>, <CE>, <SP>, ...]
+    dup1 dup4 shl                       // [(1 << 64), 0x01, 0x20, 0x40, 0x60, 0x80, | ...]
+    sub                                 // [U64M, 0x20, 0x40, 0x60, 0x80, | <CP>, <TOP>, <CE>, <SP>, ...]
+
+    // get <code_sz> and <data_sz> and evaluate new mem_start (payload data) and code_start
+    dup2 dup8 sub                       // [<TOP-0x20>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    mload                               // [<data_sz>, U64M, 0x20, 0x40, 0x60, 0x80, | <CP>, <TOP>, <CE>, <SP>, ...]
+    dup4 dup9 sub                       // [<TOP-0x40>, <data_sz>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup1 mload                          // [<code_sz>, <TOP'>, <data_sz>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // eval nm_s (new mem_start) = TOP' - data_sz
+    // NOTE: TOP' is nm_e (new mem_end)
+    dup3 dup3 sub                       // [<nm_s>, <code_sz>, <TOP'>, <data_sz>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    swap3 pop                           // [<code_sz>, <TOP'>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // eval nc_s (new code_start) = nm_s - code_sz
+    dup3 sub                            // [<nc_s>, <TOP'>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    // NOTE: nc_e = nm_s: [code bytes] [payload bytes] ||
+    //                    ^-nc_s       ^-(nc_e, nm_s)  ^-(nm_e, TOP')
+                                        // [<nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // evaluate previous frame descriptor ptr (PFD_ptr.1) = TOP'(nm_e) aligned 0x20
+    dup15 dup1                          // [0x1F, 0x1F, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup4 add                            // [<nm_e+0x1F>, 0x1F, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    swap1 not and                       // [<PFD_ptr.1>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // Write previous frame descriptor (2 words):
+    //  <state(old)> at PFD_ptr.1
+    //  <RP.SP._.CE> at PFD_ptr.2 (= PFD_ptr.1 + 0x20)
+
+    // load previous state (mem[0x60:0x80])
+    dup8 mload                          // [<state>, <PFD_ptr.1>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    // save previous state
+    dup2 mstore                         // [<PFD_ptr.1>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    // advance FDP_ptr (.1 => .2)
+    dup6 add                            // [<PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // form <RP.SP._.CE>
+    dup7 mload                          // [<reg_ptr>, <PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup8 shl                            // [<RP._>, <PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup14 or                            // [<RP.SP>, <PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup10 shl                           // [<RP.SP._._>, <PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup13 or                            // [<RP.SP._.CE>, <PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    // save <RP.SP._.CE> at FDP.2
+    dup2 mstore                         // [<PFD_ptr.2>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // advance FDP_ptr (.2 => new reg_ptr) and save it at mem[0x40:0x60] (actual reg_ptr location)
+    dup6 add                            // [<new_RP>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup1                                // [<new_RP>, <new_RP>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup8 mstore                         // [<new_RP>, <nc_s>, <nm_e>, <nm_s>, U64M, 0x20, 0x40, 0x60, 0x80, | ...]
+    // remember new_RP (push back) and pull U64M to the front
+    swap4                               // [U64M, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // Form and save new frame state: [<mem_start> <mem_end> <depth> <code_start>]
+
+    // get current depth (from state at mem[0x60:0x80]) and increment it
+    dup8 mload                          // [<x.x.depth.x>, U64M, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup8 shr                            // [<_.x.x.depth>, U64M, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    and                                 // [<depth>, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    // do increment depth: 0 - not(depth)
+    not ZERO() sub                      // [<depth'>, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | <CP>, ...]
+    // update main loop var CP => nc_s
+    dup2 swap10 pop                     // [<depth'>, <nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | <CP'>, ...]
+    // append new code start
+    dup7 shl or                         // [<depth'.nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+
+    // update main loop var: CE => nm_s (code_end = mem_start)
+    dup3 swap11 pop                     // [<depth'.nc_s>, <nm_e>, <nm_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...] (CE')
+
+    // append new mem_start and mem_end
+    swap2                               // [<nm_s>, <nm_e>, <depth'.nc_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup6 shl or                         // [<nm_s.nm_e>, <depth'.nc_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    dup7 shl or                         // [<nm_s.nm_e.depth'.nc_s>, <new_RP>, 0x20, 0x40, 0x60, 0x80, | ...]
+    // save new frame state at mem[0x60:0x80]
+    dup5 mstore                         // [<new_RP>, 0x20, 0x40, 0x60, 0x80, | <CP'>, <TOP>, <CE'>, <SP>, const...]
+
+    // update main loop var SP => new reg_ptr + 0x400
+    0x400 add                           // [<SP'>, 0x20, 0x40, 0x60, 0x80, | <CP'>, <TOP>, <CE'>, <SP>, const...]
+    swap8 pop                           // [0x20, 0x40, 0x60, 0x80, | <CP'>, <TOP>, <CE'>, <SP'>, const...]
+
+    // drop all temporary consts and make TOP = SP'
+    pop pop pop pop                     // [<CP'>, <TOP>, <CE'>, <SP'>, const...]
+    dup4 swap2 pop                      // [<CP'>, <TOP=SP'>, <CE'>, <SP'>, const...]
+
+    // all done, go to the main loop handler
+    process_eval_main_loop jump
+
+//
+//  ** SPECIAL HANDLERS **
+//
 
 process_eval_unsupported_code:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -630,20 +766,20 @@ debug_return_first_bytes_till_top:
     process_eval_unsupported_code       // EB
     process_eval_unsupported_code       // EC
     process_eval_unsupported_code       // ED
-    process_eval_unsupported_code       // EE
+    process_eval_opcode_EE_rewind
     process_eval_unsupported_code       // EF
 
     process_eval_opcode_F0_push_const
     process_eval_opcode_F1_iszero
-    process_eval_opcode_F2_iff
+    process_eval_unsupported_code       // F2
     process_eval_unsupported_code       // F3
-    process_eval_opcode_F4_rewind
-    process_eval_unsupported_code       // F5
+    process_eval_unsupported_code       // F4
+    process_eval_opcode_F5_iif
     process_eval_unsupported_code       // F6
     process_eval_unsupported_code       // F7
     process_eval_unsupported_code       // F8
     process_eval_unsupported_code       // F9
-    process_eval_unsupported_code       // FA
+    process_eval_opcode_FA_invoke_next
     process_eval_unsupported_code       // FB
     process_eval_unsupported_code       // FC
     debug_return_first_bytes_till_top   // FD
