@@ -12,7 +12,7 @@
 
 // stack ops
     0xB0        POP         pop 1 stack element                                 [ pop 1 ]   <?>
-    0xB1        DUP         push n'th stack element (N in words)                [ pop 1 ]   <n>
+    0xB1        DUP         push K'th stack element (K in words)                [ pop 1 ]   <k>
     0xB2        SWAP        swap (stack[0]-2, stack[-1]-2) elements (words)     [ pop 2 ]   <i> <j>
 
 // special stack ops and data management

@@ -78,37 +78,15 @@
     0x24 0x1C revert
 }
 
-#define macro CHECK_CODE_PTR_AND_HANDLE_NEXT(handle_next_label) = takes(13) returns(13) {
-    // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup3 dup2 slt                   // [(CP < CE), | ...]
-    <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
-}
-
-#define macro CHECK_CODE_PTR_AND_HANDLE_NEXT_OR_GOTO(handle_next_label, goto_label) = takes(13) returns(13) {
-    CHECK_CODE_PTR_AND_HANDLE_NEXT(<handle_next_label>)
-    <goto_label> jump
-}
-
-#define macro CHECK_PTRS_AND_HANDLE_NEXT(stack_extra_usage, handle_next_label, recheck_label) = takes(13) returns(13) {
-    // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
-    <stack_extra_usage>             // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup3 sub                        // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup5 sgt iszero                 // [(SP <= TOP'), | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup4 dup3 slt                   // [(CP < CE), (SP <= TOP'), | ...]
-    and                             // [<ptrs_is_ok>, ...]
-    <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
-    <stack_extra_usage>             // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    <recheck_label> jump            // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
-}
-
-#define macro CHECK_PTRS_ZERO_SEU_AND_HANDLE_NEXT(handle_next_label, recheck_label) = takes(10) returns(10) {
-    // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup2 dup5 sgt iszero            // [(SP <= TOP), | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup4 dup3 slt                   // [(CP < CE), (SP <= TOP), | ...]
-    and                             // [<ptrs_is_ok>, ...]
-    <handle_next_label> jumpi       // [<CP>, <TOP>, <CE>, <SP>, const...]
-    ZERO()                          // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    <recheck_label> jump            // [<SEU>, | <CP>, <TOP>, <CE>, <SP>, const...]
+// LAT -- Least Accessed Top (to check stack underflow error)
+#define macro CHECK_PTRS_AND_HANDLE_NEXT_LAT(handle_next_lat_label, recheck_lat_label) = takes(13) returns(13) {
+    // Input stack:                 // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1                            // [<LAT>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5 sgt iszero                 // [(SP <= LAT), <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5 dup4 slt                   // [(CP < CE), (SP <= LAT), <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    and                             // [<ptrs_ok>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    <handle_next_lat_label> jumpi   // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    <recheck_lat_label> jump        // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
 #define macro EVAL_UNARY_OPCODE_BEGIN() = takes(13) returns(15) {
@@ -117,16 +95,18 @@
     dup1 mload                      // [<stack[0]>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
-#define macro EVAL_UNARY_OPCODE_END() = takes(15) returns(13) {
+#define macro EVAL_UNARY_OPCODE_END() = takes(15) returns(14) {
     // Input stack:                 // [<VALUE>, <(top-1_ptr), | <CP>, <TOP>, <CE>, <SP>, ...]
-    swap1 mstore                    // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 mstore                     // [<(top-1_ptr), | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
-#define macro EVAL_UNARY_OPCODE(todo_op) = takes(13) returns(13) {
+#define macro EVAL_UNARY_OPCODE(todo_op) = takes(13) returns(14) {
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_UNARY_OPCODE_BEGIN()       // [<stack[0]>, <(top-1)_ptr>, | ...]
     <todo_op>                       // [<VALUE>, <(top-1)_ptr>, | ...]
-    EVAL_UNARY_OPCODE_END()         // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_UNARY_OPCODE_END()         // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // NOTE: LAT = (top-1)_ptr
 }
 
 #define macro EVAL_BINARY_OPCODE_BEGIN() = takes(13) returns(16) {
@@ -141,22 +121,24 @@
     // NOTE: FROM HERE <(top-1)_ptr> becomes a new TOP
 }
 
-#define macro EVAL_BINARY_OPCODE_END() = takes(15) returns(13) {
+#define macro EVAL_BINARY_OPCODE_END() = takes(15) returns(14) {
     // Input stack:                 // [<VALUE>, <(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    swap1 mstore                    // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 mstore                     // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // NOTE: LAT = (top-2)_ptr
 }
 
-#define macro EVAL_BINARY_OPCODE_REVERSED(todo_op) = takes(13) returns(13) {
+#define macro EVAL_BINARY_OPCODE_REVERSED(todo_op) = takes(13) returns(14) {
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_BINARY_OPCODE_BEGIN()      // [<stack[0]>, <stack[-1]>, <(top-2)_ptr>, | ...]
     swap1 <todo_op>                 // [<VALUE>, <(top-2)_ptr>, | ...]
-    EVAL_BINARY_OPCODE_END()        // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_END()        // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
-#define macro EVAL_BINARY_OPCODE_DIRECT(todo_op) = takes(13) returns(13) {
+#define macro EVAL_BINARY_OPCODE_DIRECT(todo_op) = takes(13) returns(14) {
     // Input stack:                 // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_BINARY_OPCODE_BEGIN()      // [<stack[0]>, <stack[-1]>, <(top-2)_ptr>, | ...]
     <todo_op>                       // [<VALUE>, <(top-2)_ptr>, | ...]
-    EVAL_BINARY_OPCODE_END()        // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_END()        // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
