@@ -375,12 +375,67 @@ process_eval_opcode_B0_pop_rewind_to:
 process_eval_opcode_B1_dup:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // check stack underflow for the <(top-1)_ptr> (K value ptr)
+    dup1 dup6 sgt                       // [(SP > K_ptr), <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jumpi
+                                        // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
     dup1 mload                          // [<K>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup12 mul                           // [<K*0x20>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup2 sub                            // [<val_ptr>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    not dup12 mul                       // [<-v_offset>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 add                            // [<v_ptr>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // check stack underflow for the v_ptr
+    dup1 dup7 sgt                       // [(SP > v_ptr), <v_ptr>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_B2_swap_stack_underflow_v12 jumpi
+                                        // [<v_ptr>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
     mload                               // [<VALUE>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     swap1 mstore                        // [<CP>, <TOP>, <CE>, <SP>, const...]
-    // TODO check ptrs
+    process_eval_recheck_code_ptr jump
+
+process_eval_opcode_B2_swap:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // check stack underflow for the TOP' = (top-2)_ptr
+    dup1 dup6 sgt                       // [(SP > TOP'), <(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jumpi
+                                        // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup11 swap1 sub                     // [<(top-1)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    mload                               // [<stack[0]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup3 mload                          // [<stack[-1]>, <stack[0]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    not dup12 mul                       // [<-offset_2>, <stack[0]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    swap1                               // [<stack[0]>, <offset_2>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    not dup12 mul                       // [<-offset_1>, <-offset_2>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup4 add                            // [<v1_ptr>, <offset_2>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    swap1                               // [<offset_2>, <v1_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup4 add                            // [<v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+
+    // check ptrs (both compare with SP, it's cheaper than get least of them and compare then)
+    dup2 dup7 sgt                       // [(SP > v1_ptr), <v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup2 dup8 sgt or                    // [(SP > v[1,2]_ptr), <v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    process_eval_opcode_B2_swap_stack_underflow_v12 jumpi
+                                        // [<v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+
+    dup2 mload                          // [<v1>, <v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup2 mload                          // [<v2>, <v1>, <v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    swap2 mstore                        // [<v2>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    swap1 mstore                        // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    process_eval_recheck_code_ptr jump
+
+process_eval_opcode_B2_swap_stack_underflow_v12:
+    // Input stack:                     // [<v2_ptr>, <v1_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup1 dup3 slt                       // [(v1_ptr < v2_ptr), <v2_ptr>, <v1_ptr>, | ...]
+    process_eval_opcode_B2_swap_stack_underflow_v12_continue jumpi
+    swap1                               // [<?>, <LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+
+process_eval_opcode_B2_swap_stack_underflow_v12_continue:
+    // Input stack                      // [<?>, <LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    pop                                 // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jump
 
 process_eval_opcode_B5_rewind:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -820,8 +875,8 @@ process_eval_opcode_FD_debug:
 //
 
     process_eval_opcode_B0_pop
-    process_eval_unsupported_opcode         // B1
-    process_eval_unsupported_opcode         // B2
+    process_eval_opcode_B1_dup
+    process_eval_opcode_B2_swap
     process_eval_unsupported_opcode         // B3
     process_eval_unsupported_opcode         // B4
     process_eval_opcode_B5_rewind
