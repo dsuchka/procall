@@ -19,14 +19,14 @@
     0xB3        TOP_PTR     push current top_ptr (points to the value itself)
     0xB4        STACK_PTR   push current stack_ptr (points to the beggining of the stack)
 
-    0xB5        ALLOC_N     move top_ptr forward for the N (N in bytes)         [ pop 1 ]   <n>
+    0xB5        ALLOC       move top_ptr forward for the N (N in bytes)         [ pop 1 ]   <n>
                                 and push pointer to the beginning
                                 of the data region onto the stack
 
-    0xB5        REWIND_N    rewind top_ptr:
+    0xB5        REWIND      rewind top_ptr:
                                 top_ptr = top_ptr - N (N in bytes)              [ pop 1 ]   <n>
 
-    0xB6        TRUNC_N     set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
+    0xB6        TRUNC       set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
                                 top_ptr = stack_ptr + N
 
     0xB7        ALIGN       align top_ptr to word size (0x20):
@@ -122,12 +122,11 @@
     0xE9        RSAVE       (reg[stack[0]] = stack[-1])                     [ pop 2 ]   <data> <reg>
 
 // code evaluation ops
-    0xEA        FINISH      stop evaluation, return with the full stack data
-    0xEB        REVERT      stop evaluation, revert with the full stack data
-    0xEC        FINISH_N    stop evaluation, return with n last bytes of the stack
-    0xED        REVERT_N    stop evaluation, revert with n last bytes of the stack
+    0xEA        FINISH      stop evaluation, return with n last bytes of the stack  [ pop 1 ]   <n>
+    0xEB        REVERT      stop evaluation, revert with n last bytes of the stack  [ pop 1 ]   <n>
+    0xEE        STACKSIZE   push current stack size onto the stack
 
-    (0xEE..0xEF reserved)
+    (0xED..0xEF reserved)
 
     ** SPECIAL_CODES **
 
