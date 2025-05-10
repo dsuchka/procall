@@ -13,17 +13,15 @@
 //                           https://www.hashicorp.com/en/bsl
 
 
-// owner slot is always zero
-#define constant OWNER_SLOT = 0x00
+#define error Forbidden()
+#define error NoImplementation()
+#define error StackUnderflow(uint256 underflowSize)
+#define error OutOfCode(uint256 extraOffset)
+#define error UnsupportedOpcode(uint256 opcode)
 
-// keccak256('Procall::implementation')[:8]
-#define constant IMPLEMENTATION_SLOT = 0xb45b3ef5fc45be41
 
-// echo -n 'Procall' | xxd -p
-#define constant CONTRACT_NAME_STR = 0x50726f63616c6c
-#define constant CONTRACT_NAME_LEN = 0x7
+#define function eval() payable returns()
+#define function contract_name() view returns(string)
+#define function contract_version() view returns(string)
 
-// echo -n '0.1.0' | xxd -p
-#define constant CONTRACT_VERSION_STR = 0x302e312e30
-#define constant CONTRACT_VERSION_LEN = 0x5
 

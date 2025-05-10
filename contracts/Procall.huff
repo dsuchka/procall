@@ -14,10 +14,7 @@
 
 
 #include "helper.huff"
-
-#define function eval() payable returns()
-#define function contract_name() view returns(string)
-#define function contract_version() view returns(string)
+#include "external.huff"
 
 #define macro CONSTRUCTOR() = takes(0) returns(0) {
     caller  SAVE_OWNER()
@@ -190,8 +187,9 @@ process_eval:
          0x1E0 mstore                               // [const...]
 
     // part.4: copy remaining locations from jump table
-    dup9                                                // [0x80, const...]
-    __tablestart(OPCODES__JUMP_TABLE) 0x200 codecopy    // [const...]
+    __tablesize(OPCODES__JUMP_TABLE)                    // [<sz>, const...]
+    __tablestart(OPCODES__JUMP_TABLE)                   // [<ofs>, <sz>, const...]
+    0x200 codecopy                                      // [const...]
 
     // Frame:
     //  [system data] | [code] [regs] |
@@ -352,6 +350,8 @@ process_eval_recheck_code_ptr:
 
     // OutOfCode(uint256 extraOffset) when (CP > CE)
     dup3 dup2 sub                       // [(CP - CE), | ...]
+
+process_eval_revert_out_of_code:
     __FUNC_SIG(OutOfCode)               // [<__error_selector>, <arg1>, | ...]
     do_revert_with_error_1_arg jump
 
@@ -478,6 +478,11 @@ process_eval_opcode_D7_gasleft:
     gas                                 // [<VALUE>, | ...]
     process_eval_push_value jump
 
+process_eval_opcode_FE00_chaind:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    chainid                             // [<VALUE>, | ...]
+    process_eval_push_value jump
+
 process_eval_opcode_D8_balanceof:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_UNARY_OPCODE(balance)
@@ -549,6 +554,51 @@ process_eval_opcode_F5_iif:
 process_eval_opcode_F5_iif_continue_unchanged:
     // Input stack:                     // [<CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT(dup10, process_eval_handle_next_opcode, process_eval_recheck_ptrs)
+
+
+process_eval_opcode_FE_extended_prefix:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<dirtyOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    ZERO() byte                         // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup4 dup3 slt                       // [(CP < CE), <extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup13 dup3                          // [<extOP>, 0x40, (CP < CE), <extOP>, | ...]
+    slt and                             // [<(extOP < 0x40) & (CP < CE)>, <extOP>, | ...]
+    process_eval_opcode_FE_extended_prefix_continue_checked jumpi
+
+    // Recheck errors
+    // Input stack:                     // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup2 slt                      // [(extOP < 0x40), <extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_FE_extended_prefix_out_of_code jumpi
+
+    // Input stack:                     // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    0xFE00 or                           // [<OP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap14 pop                          // [<CP>, <TOP>, <CE>, <SP>, const..., <OP'>]
+    process_eval_unsupported_opcode jump
+
+process_eval_opcode_FE_extended_prefix_out_of_code:
+    // Input stack:                     // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup10                               // [1, <extOP>, | ...]
+    process_eval_revert_out_of_code jump
+
+process_eval_opcode_FE_extended_prefix_continue_checked:
+    // Input stack:                     // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 0xFE00 or                      // [<OP'>, <extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap15 pop                          // [<extOP>, | <CP>, <TOP>, <CE>, <SP>, const..., <OP'>]
+
+    // advance code_ptr (<CP>): CP = CP+1
+    dup2                                // [<CP>, <extOP> | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 add                           // [<CP'>, <extOP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2 pop                           // [<extOP>, | <CP'>, <TOP>, <CE>, <SP>, const...]
+
+    // NOTE: FROM HERE <CP'> (next CP) is normal <CP>
+
+    // load extended opcode and do jump
+    // jump address is (mem[0x280+(extop*2)-0x1E] => mem[0x262+(extop*2)]) & 0xFFFF
+    dup1 add 0x262 add                  // [<jmp_mem_addr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    mload                               // [<dirty_jmp>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup6 and                            // [<jmp>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    jump                                // [<CP>, <TOP>, <CE>, <SP>, const...]
+
 
 
 //
@@ -650,14 +700,16 @@ process_eval_opcode_FA_invoke_next:
     // all done, go to the main loop handler
     process_eval_main_loop jump
 
+
+
 //
 //  ** SPECIAL HANDLERS **
 //
 
-process_eval_unsupported_code:
+process_eval_unsupported_opcode:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup14                               // [<OP>, | ...]
-    __FUNC_SIG(UnsupportedCode)         // (<__error_selector>, <OP>), [...]
+    __FUNC_SIG(UnsupportedOpcode)       // (<__error_selector>, <OP>), [...]
     do_revert_with_error_1_arg jump
 
 debug_return_first_4k_bytes:
@@ -745,46 +797,118 @@ process_eval_opcode_FD_debug:
     process_eval_opcode_D8_balanceof
 
     process_eval_opcode_D9_pop
-    process_eval_unsupported_code       // DA
-    process_eval_unsupported_code       // DB
-    process_eval_unsupported_code       // DC
-    process_eval_unsupported_code       // DD
-    process_eval_unsupported_code       // DE
-    process_eval_unsupported_code       // DF
+    process_eval_unsupported_opcode         // DA
+    process_eval_unsupported_opcode         // DB
+    process_eval_unsupported_opcode         // DC
+    process_eval_unsupported_opcode         // DD
+    process_eval_unsupported_opcode         // DE
+    process_eval_unsupported_opcode         // DF
 
-    process_eval_unsupported_code       // E0
-    process_eval_unsupported_code       // E1
-    process_eval_unsupported_code       // E2
-    process_eval_unsupported_code       // E3
-    process_eval_unsupported_code       // E4
-    process_eval_unsupported_code       // E5
-    process_eval_unsupported_code       // E6
-    process_eval_unsupported_code       // E7
+    process_eval_unsupported_opcode         // E0
+    process_eval_unsupported_opcode         // E1
+    process_eval_unsupported_opcode         // E2
+    process_eval_unsupported_opcode         // E3
+    process_eval_unsupported_opcode         // E4
+    process_eval_unsupported_opcode         // E5
+    process_eval_unsupported_opcode         // E6
+    process_eval_unsupported_opcode         // E7
     process_eval_opcode_E8_rload
     process_eval_opcode_E9_rsave
-    process_eval_unsupported_code       // EA
-    process_eval_unsupported_code       // EB
-    process_eval_unsupported_code       // EC
-    process_eval_unsupported_code       // ED
+    process_eval_unsupported_opcode         // EA
+    process_eval_unsupported_opcode         // EB
+    process_eval_unsupported_opcode         // EC
+    process_eval_unsupported_opcode         // ED
     process_eval_opcode_EE_rewind
-    process_eval_unsupported_code       // EF
+    process_eval_unsupported_opcode         // EF
 
     process_eval_opcode_F0_push_const
     process_eval_opcode_F1_iszero
-    process_eval_unsupported_code       // F2
-    process_eval_unsupported_code       // F3
-    process_eval_unsupported_code       // F4
+    process_eval_unsupported_opcode         // F2
+    process_eval_unsupported_opcode         // F3
+    process_eval_unsupported_opcode         // F4
     process_eval_opcode_F5_iif
-    process_eval_unsupported_code       // F6
-    process_eval_unsupported_code       // F7
-    process_eval_unsupported_code       // F8
-    process_eval_unsupported_code       // F9
+    process_eval_unsupported_opcode         // F6
+    process_eval_unsupported_opcode         // F7
+    process_eval_unsupported_opcode         // F8
+    process_eval_unsupported_opcode         // F9
     process_eval_opcode_FA_invoke_next
-    process_eval_unsupported_code       // FB
-    process_eval_unsupported_code       // FC
+    process_eval_unsupported_opcode         // FB
+    process_eval_unsupported_opcode         // FC
     process_eval_opcode_FD_debug
-    process_eval_unsupported_code       // FE
+    process_eval_opcode_FE_extended_prefix
     process_eval_opcode_FF_push_const
+
+    //
+    // Extended codes
+    //
+
+    process_eval_opcode_FE00_chaind
+    process_eval_unsupported_opcode         // 01
+    process_eval_unsupported_opcode         // 02
+    process_eval_unsupported_opcode         // 03
+    process_eval_unsupported_opcode         // 04
+    process_eval_unsupported_opcode         // 05
+    process_eval_unsupported_opcode         // 06
+    process_eval_unsupported_opcode         // 07
+    process_eval_unsupported_opcode         // 08
+    process_eval_unsupported_opcode         // 09
+    process_eval_unsupported_opcode         // 0A
+    process_eval_unsupported_opcode         // 0B
+    process_eval_unsupported_opcode         // 0C
+    process_eval_unsupported_opcode         // 0D
+    process_eval_unsupported_opcode         // 0E
+    process_eval_unsupported_opcode         // 0F
+
+    process_eval_unsupported_opcode         // 10
+    process_eval_unsupported_opcode         // 11
+    process_eval_unsupported_opcode         // 12
+    process_eval_unsupported_opcode         // 13
+    process_eval_unsupported_opcode         // 14
+    process_eval_unsupported_opcode         // 15
+    process_eval_unsupported_opcode         // 16
+    process_eval_unsupported_opcode         // 17
+    process_eval_unsupported_opcode         // 18
+    process_eval_unsupported_opcode         // 19
+    process_eval_unsupported_opcode         // 1A
+    process_eval_unsupported_opcode         // 1B
+    process_eval_unsupported_opcode         // 1C
+    process_eval_unsupported_opcode         // 1D
+    process_eval_unsupported_opcode         // 1E
+    process_eval_unsupported_opcode         // 1F
+
+    process_eval_unsupported_opcode         // 20
+    process_eval_unsupported_opcode         // 21
+    process_eval_unsupported_opcode         // 22
+    process_eval_unsupported_opcode         // 23
+    process_eval_unsupported_opcode         // 24
+    process_eval_unsupported_opcode         // 25
+    process_eval_unsupported_opcode         // 26
+    process_eval_unsupported_opcode         // 27
+    process_eval_unsupported_opcode         // 28
+    process_eval_unsupported_opcode         // 29
+    process_eval_unsupported_opcode         // 2A
+    process_eval_unsupported_opcode         // 2B
+    process_eval_unsupported_opcode         // 2C
+    process_eval_unsupported_opcode         // 2D
+    process_eval_unsupported_opcode         // 2E
+    process_eval_unsupported_opcode         // 2F
+
+    process_eval_unsupported_opcode         // 30
+    process_eval_unsupported_opcode         // 31
+    process_eval_unsupported_opcode         // 32
+    process_eval_unsupported_opcode         // 33
+    process_eval_unsupported_opcode         // 34
+    process_eval_unsupported_opcode         // 35
+    process_eval_unsupported_opcode         // 36
+    process_eval_unsupported_opcode         // 37
+    process_eval_unsupported_opcode         // 38
+    process_eval_unsupported_opcode         // 39
+    process_eval_unsupported_opcode         // 3A
+    process_eval_unsupported_opcode         // 3B
+    process_eval_unsupported_opcode         // 3C
+    process_eval_unsupported_opcode         // 3D
+    process_eval_unsupported_opcode         // 3E
+    process_eval_unsupported_opcode         // 3F
 
 }
 

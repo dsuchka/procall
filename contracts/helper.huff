@@ -13,8 +13,26 @@
 //                           https://www.hashicorp.com/en/bsl
 
 
+#include "basic.huff"
 #include "tvm_opcodes.huff"
 #include "constants.huff"
+
+#define macro LOAD_OWNER() = takes(0) returns(1) {
+    ZERO() sload
+}
+
+#define macro LOAD_IMPLEMENTATION() = takes(0) returns(1) {
+    [IMPLEMENTATION_SLOT] sload
+}
+
+#define macro SAVE_OWNER() = takes(1) returns(0) {
+    ZERO() sstore
+}
+
+#define macro SAVE_IMPLEMENTATION() = takes(1) returns(0) {
+    [IMPLEMENTATION_SLOT] sstore
+}
+
 
 #define macro RETURN_SHORT_MESSAGE() = takes(2) returns(0) {
     // Input stack: [<sz>, <__str>]
