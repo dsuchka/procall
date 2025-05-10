@@ -2,14 +2,55 @@
     0x00            debug (return mem from 0x0 to 0x1000 address, first 4kb)
 --
     0x01..0x80      push constants 0x01..0x80   (pushConst)
-    0x81..0x9F      push constants 0xA0..0x460  (pushConstX32)
+    0x81..0x8F      push constants 0xA0..0x260  (pushConstX32)
+--
     0xF0            push constant 0x00          (pushZero)
     0xFF            push constant 0xFFF...FFF   (pushNegativeOne)
 
 // push data
-    0xA0..0xBF      push next [1..32] bytes (pushData)
+    0x90..0xAF      push next [1..32] bytes (pushData)
 
-// math ops
+// stack ops
+    0xB0        POP         pop 1 stack element                                 [ pop 1 ]   <?>
+    0xB1        DUP         push n'th stack element (N in words)                [ pop 1 ]   <n>
+    0xB2        SWAP        swap (stack[0]-2, stack[-1]-2) elements (words)     [ pop 2 ]   <i> <j>
+
+// special stack ops and data management
+    0xB3        TOP_PTR     push current top_ptr (points to the value itself)
+    0xB4        STACK_PTR   push current stack_ptr (points to the beggining of the stack)
+
+    0xB5        ALLOC_N     move top_ptr forward for the N (N in bytes)         [ pop 1 ]   <n>
+                                and push pointer to the beginning
+                                of the data region onto the stack
+
+    0xB5        REWIND_N    rewind top_ptr:
+                                top_ptr = top_ptr - N (N in bytes)              [ pop 1 ]   <n>
+
+    0xB6        TRUNC_N     set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
+                                top_ptr = stack_ptr + N
+
+    0xB7        ALIGN       align top_ptr to word size (0x20):
+                                top_ptr = (top_ptr + 0x1F) & (~0x1F)
+
+    0xB8        DLOAD       load word at the ptr and push it on the stack       [ pop 1 ]   <ptr>
+                                (stack[0] = *stack[0])
+                            NOTE: it's allowed to load data from previous
+                                stack frames (thus data can be accessed on
+                                top level from deep invocations)
+
+    0xB9        DSAVE       save data word at the ptr                           [ pop 2 ] <data> <ptr>
+                            NOTE: the ptr to write at MUST BE within the
+                                current stack frame (i. e. data_ptr >= stack_ptr)
+
+// boolean ops
+    0xBA        ISZERO  (stack[0] = iszero(stack[0]))
+    0xBB        LT      (stack[-1] = stack[-1] < stack[0])              [ pop 1 ]
+    0xBC        GT      (stack[-1] = stack[-1] > stack[0])              [ pop 1 ]
+    0xBD        SLT     (stack[-1] = stack[-1] <' stack[0])             [ pop 1 ]   *signed
+    0xBE        SGT     (stack[-1] = stack[-1] >' stack[0])             [ pop 1 ]   *signed
+    0xBF        IIF     (stack[-2] = stack[0] ? stack[-1] : stack[-2])  [ pop 2 ]
+
+// math (arithmetical) ops
     0xC0        ADD     (stack[-1] = stack[-1] + stack[0])  [ pop 1 ]
     0xC1        SUB     (stack[-1] = stack[-1] - stack[0])  [ pop 1 ]
     0xC2        MUL     (stack[-1] = stack[-1] * stack[0])  [ pop 1 ]
@@ -40,10 +81,7 @@
     0xD7        GASLEFT     push remaining gas value
     0xD8        BALANCEOF   (stack[0] = balance(address(stack[0])))
 
-// stack ops
-    0xD9        POP         pop 1 stack element                                 [ pop 1 ]   <?>
-    0xDA        DUP         push n'th stack element (N in words)                [ pop 1 ]   <n>
-    0xDB        SWAP        swap (stack[0]-2, stack[-1]-2) elements (words)     [ pop 2 ]   <n> <m>
+    (0xD9..0xDB reserved)
 
 // storage ops
     0xDC        SLOAD       (stack[0] = sload(stack[0]))
@@ -88,9 +126,8 @@
     0xEB        REVERT      stop evaluation, revert with the full stack data
     0xEC        FINISH_N    stop evaluation, return with n last bytes of the stack
     0xED        REVERT_N    stop evaluation, revert with n last bytes of the stack
-    0xEE        REWIND_N    rewind stack's top ptr:
-                                top_ptr = top_ptr - N (N in bytes)          [ pop 0x20+n (bytes) ] <n> <...>
-    0xEF        TOP_PTR     push current top_ptr (points to the value itself)
+
+    (0xEE..0xEF reserved)
 
     ** SPECIAL_CODES **
 
@@ -98,13 +135,7 @@
     0xF0        PUSH0       push constant zero
     0xFF        PUSHNEGONE  push constant -1 (negative one)
 
-// boolean ops
-    0xF1        ISZERO      (stack[0] = iszero(stack[0]))
-    0xF2        LT          (stack[-1] = stack[-1] < stack[0])              [ pop 1 ]
-    0xF2        GT          (stack[-1] = stack[-1] > stack[0])              [ pop 1 ]
-    0xF3        SLT         (stack[-1] = stack[-1] <' stack[0])             [ pop 1 ]   *signed
-    0xF4        SGT         (stack[-1] = stack[-1] >' stack[0])             [ pop 1 ]   *signed
-    0xF5        IIF         (stack[-2] = stack[0] ? stack[-1] : stack[-2])  [ pop 2 ]
+    (0xF1..0xF5 reserved)
 
 // conditional ops
     0xF6        DOIF        evaluate next code only if condition is true    [ pop 1 ]   <cond>
