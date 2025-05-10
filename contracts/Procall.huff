@@ -106,7 +106,7 @@ process_eval:
     //  Memory layout:
     //      0x0000              (???)               [1 word]
     //      0x0020              (???)               [1 word]
-    //      0x0040              <reg_ptr>           [1 word]
+    //      0x0040              (???)               [1 word]
     //      0x0060              <frame_state>       [1 word: 4 × uint64]
     //      0x0080..0x0280      opcodes jump table  [16 words]  (256 opcodes)
     //      0x0280..0x0300      extended jump table [4 words]   (64 opcodes)
@@ -117,7 +117,7 @@ process_eval:
 
     //  Previous frame descriptor consists of 2 words:
     //  #1. [<frame state>]
-    //  #2. [<reg_ptr> <stack_ptr> <00..00> <code_end>]          (uint64 each)
+    //  #2. [<00..00> <stack_ptr> <00..00> <code_end>]          (uint64 each)
 
     //  INVOKENEXT (deep invocation) mechanism:
     //
@@ -127,7 +127,7 @@ process_eval:
     //
     //  Push frame data on stack and allocate new registers:
     //      ... | [code bytes] [payload bytes] || <prev_frame_desc> [registers] | =>
-    //            ^--ret_ptr   ^-- mem_ptr        (0x20-aligned)    ^--reg_ptr    ^-- new SP and top
+    //            ^--ret_ptr   ^-- mem_ptr        (0x20-aligned)    ^--reg_start  ^-- new SP and top
     //
 
     //  Main loop EVM-stack layout:
@@ -211,18 +211,14 @@ process_eval:
     // evaluate code_end (<CE>)
     dup2 add                                // [<CE>, <CP>, const...]
 
-    // evaluate reg_ptr (<RP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
+    // evaluate reg_start (<RP>) [do word alignment: <CE+0x1F> & ~(0x1F)]
     dup5 dup2                               // [<CE>, 0x1F, <CE>, <CP>, const...]
     dup2 add                                // [<CE+0x1F>, 0x1F, <CE>, <CP>, const...]
     swap1 not                               // [<~0x1F>, <CE+0x1F>, <CE>, <CP>, const...]
     and                                     // [<RP>, <CE>, <CP>, const...]
 
-    // store it: mem[0x40:0x60] = <reg_ptr>
-    dup1                                    // [<RP>, <RP>, <CE>, <CP>, const...]
-    dup11 mstore                            // [<RP>, <CE>, <CP>, const...]
-
-    // evaluate stack_ptr (<SP>): reg_ptr + 0x400
-    0x0400 add                              // [<SP>, <CE>, <CP>, const...]
+    // evaluate stack_ptr (<SP>): reg_start + 0x100 [total 8 registers]
+    0x0100 add                              // [<SP>, <CE>, <CP>, const...]
 
     // evaluate top_ptr (starts from stack_ptr when stack is empty, i. e. TOP = SP)
     dup1                                    // [<SP>, <TOP>, <CE>, <CP>, const...]
@@ -579,10 +575,9 @@ process_eval_opcode_D8_balanceof:
 process_eval_opcode_E8_rload:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_UNARY_OPCODE_BEGIN()           // [<stack[0]>, <(top-1)_ptr>, | ...]
-    dup9 and                            // [<reg_idx>, <(top-1)_ptr>, | ...]
-    dup12 mul                           // [<reg_idx*0x20>, <(top-1)_ptr>, | ...]
-    dup13 mload                         // [<reg_ptr>, <reg_idx*0x20>, <(top-1)_ptr>, | ...]
-    add                                 // [<reg_pos>, <(top-1)_ptr>, | ...]
+    0x07 and                            // [<reg_idx>, <(top-1)_ptr>, | ...]
+    not dup12 mul                       // [<-reg_ofs>, <(top-1)_ptr>, | ...]
+    dup6 add                            // [<reg_ptr>, <(top-1)_ptr>, | ...]
     mload                               // [<VALUE>, <(top-1)_ptr>, | ...]
     EVAL_UNARY_OPCODE_END()             // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
@@ -595,10 +590,9 @@ process_eval_opcode_E9_rsave:
     swap1                               // [<TOP>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     dup12 swap1 sub                     // [<(top-1)_ptr>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
     mload                               // [<stack[0]>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup9 and                            // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup12 mul                           // [<reg_idx*0x20>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup13 mload                         // [<reg_ptr>, <reg_idx*0x20>, <stack[-1]>, | ...]
-    add                                 // [<reg_pos>, <stack[-1]>, | ...]
+    0x07 and                            // [<reg_idx>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    not dup12 mul                       // [<-reg_ofs>, <stack[-1]>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup6 add                            // [<reg_ptr>, <stack[-1]>, | ...]
 
     // NOTE: FROM HERE <(top-2)_ptr> is new TOP (<TOP'>) and LAT (Least Accessed Top)
     mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
@@ -697,6 +691,7 @@ process_eval_opcode_FE_extended_prefix_continue_checked:
 //  ** INVOCATION HANDLERS **
 //
 
+// TODO rewrite (reg_start = SP-0x100, reg_end = SP)
 process_eval_opcode_FA_invoke_next:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     // AVM-Stack args:                  // [...] | [<code_sz> <data_sz>] |
