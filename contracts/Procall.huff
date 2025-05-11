@@ -433,6 +433,16 @@ process_eval_opcode_B2_swap_stack_underflow_v12_continue:
     pop                                 // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     process_eval_recheck_ptrs_revert_stack_underflow jump
 
+process_eval_opcode_B3_top_ptr:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup2                                // [<TOP>, | ...]
+    process_eval_push_value jump
+
+process_eval_opcode_B4_stack_ptr:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup4                                // [<SP>, | ...]
+    process_eval_push_value jump
+
 process_eval_opcode_B5_rewind:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -872,8 +882,8 @@ process_eval_opcode_FD_debug:
     process_eval_opcode_B0_pop
     process_eval_opcode_B1_dup
     process_eval_opcode_B2_swap
-    process_eval_unsupported_opcode         // B3
-    process_eval_unsupported_opcode         // B4
+    process_eval_opcode_B3_top_ptr
+    process_eval_opcode_B4_stack_ptr
     process_eval_opcode_B5_rewind
     process_eval_unsupported_opcode         // B6
     process_eval_unsupported_opcode         // B7
