@@ -23,14 +23,11 @@
                                 and push pointer to the beginning
                                 of the data region onto the stack
 
-    0xB5        REWIND      rewind top_ptr:
+    0xB6        REWIND      rewind top_ptr:
                                 top_ptr = top_ptr - N (N in bytes)              [ pop 1 ]   <n>
 
-    0xB6        TRUNC       set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
+    0xB7        TRUNC       set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
                                 top_ptr = stack_ptr + N
-
-    0xB7        ALIGN       align top_ptr to word size (0x20):
-                                top_ptr = (top_ptr + 0x1F) & (~0x1F)
 
     0xB8        DLOAD       load word at the ptr and push it on the stack       [ pop 1 ]   <ptr>
                                 (stack[0] = *stack[0])

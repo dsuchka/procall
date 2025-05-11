@@ -443,7 +443,7 @@ process_eval_opcode_B4_stack_ptr:
     dup4                                // [<SP>, | ...]
     process_eval_push_value jump
 
-process_eval_opcode_B5_rewind:
+process_eval_opcode_B6_rewind:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
@@ -884,8 +884,8 @@ process_eval_opcode_FD_debug:
     process_eval_opcode_B2_swap
     process_eval_opcode_B3_top_ptr
     process_eval_opcode_B4_stack_ptr
-    process_eval_opcode_B5_rewind
-    process_eval_unsupported_opcode         // B6
+    process_eval_unsupported_opcode         // B5
+    process_eval_opcode_B6_rewind
     process_eval_unsupported_opcode         // B7
     process_eval_unsupported_opcode         // B8
     process_eval_unsupported_opcode         // B9
