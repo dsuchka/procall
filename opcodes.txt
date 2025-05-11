@@ -25,6 +25,8 @@
 
     0xB6        REWIND      rewind top_ptr:
                                 top_ptr = top_ptr - N (N in bytes)              [ pop 1 ]   <n>
+                            NOTE: it's allowed to rewind forward
+                                (i. e. when N is negative)
 
     0xB7        TRUNC       set stack size to be N (N in bytes)                 [ pop 1 ]   <n>
                                 top_ptr = stack_ptr + N

@@ -443,12 +443,43 @@ process_eval_opcode_B4_stack_ptr:
     dup4                                // [<SP>, | ...]
     process_eval_push_value jump
 
+process_eval_opcode_B5_alloc:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<N>, <d_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    ZERO() dup2 slt                     // [(N < 0), <N>, <d_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_B5_alloc_revert_illegal_argument jumpi
+                                        // [<N>, <d_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup4 add                            // [<TOP'>, <d_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap3 pop                           // [<d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup1                                // [<d_ptr>, <d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup12 dup5 sub                      // [<(top'-1)_ptr>, <d_ptr>, <d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    mstore                              // [<LAT=d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_B5_alloc_revert_illegal_argument:
+    // IllegalArgument(uint256 argValue)
+    // Input stack:                     // [<ARG>, ...]
+    __FUNC_SIG(IllegalArgument)
+    do_revert_with_error_1_arg jump
+
 process_eval_opcode_B6_rewind:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup1 mload                          // [<n>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<N>, <(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
     swap1 sub                           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
     process_eval_opcode_B0_pop_rewind_to jump
+
+process_eval_opcode_B7_trunc:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<N>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    ZERO() dup2 slt                     // [(N < 0), <N>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_B5_alloc_revert_illegal_argument jumpi
+                                        // [<N>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup6 add                            // [<TOP'>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap3 pop                           // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
 
 process_eval_opcode_C0_add:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -884,9 +915,9 @@ process_eval_opcode_FD_debug:
     process_eval_opcode_B2_swap
     process_eval_opcode_B3_top_ptr
     process_eval_opcode_B4_stack_ptr
-    process_eval_unsupported_opcode         // B5
+    process_eval_opcode_B5_alloc
     process_eval_opcode_B6_rewind
-    process_eval_unsupported_opcode         // B7
+    process_eval_opcode_B7_trunc
     process_eval_unsupported_opcode         // B8
     process_eval_unsupported_opcode         // B9
     process_eval_opcode_BA_iszero

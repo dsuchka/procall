@@ -18,7 +18,7 @@
 #define error StackUnderflow(uint256 underflowSize)
 #define error OutOfCode(uint256 extraOffset)
 #define error UnsupportedOpcode(uint256 opcode)
-
+#define error IllegalArgument(uint256 argValue)
 
 #define function eval() payable returns()
 #define function contract_name() view returns(string)
