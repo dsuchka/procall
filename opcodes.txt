@@ -35,11 +35,14 @@
                                 (stack[0] = *stack[0])
                             NOTE: it's allowed to load data from previous
                                 stack frames (thus data can be accessed on
-                                top level from deep invocations)
+                                top level from deep invocations), but not
+                                ahead of the top, i. e.:
+                                    (data_ptr <= (top_ptr-0x20))
 
     0xB9        DSAVE       save data word at the ptr                           [ pop 2 ] <data> <ptr>
                             NOTE: the ptr to write at MUST BE within the
-                                current stack frame (i. e. data_ptr >= stack_ptr)
+                                current stack frame, i. e.:
+                                    (stack_ptr <= data_ptr <= (top_ptr-0x20))
 
 // boolean ops
     0xBA        ISZERO  (stack[0] = iszero(stack[0]))

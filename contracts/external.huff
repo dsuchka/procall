@@ -16,7 +16,8 @@
 #define error Forbidden()
 #define error NoImplementation()
 #define error StackUnderflow(uint256 underflowSize)
-#define error OutOfCode(uint256 extraOffset)
+#define error OutOfCode(uint256 codeOffset)
+#define error OutOfData(uint256 dataOffset)
 #define error UnsupportedOpcode(uint256 opcode)
 #define error IllegalArgument(uint256 argValue)
 

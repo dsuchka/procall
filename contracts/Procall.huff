@@ -88,7 +88,7 @@ handle_contract_version:
 
 
 do_revert_forbidden:
-    __FUNC_SIG(Forbidden)
+    __FUNC_SIG(Forbidden)               // [<__error_selector>, | ...]
     // fall down to <do_revert_with_error_no_args>
 
 do_revert_with_error_no_args:
@@ -312,13 +312,14 @@ process_eval_recheck_ptrs:
     process_eval_recheck_code_ptr jump  // [<CP>, <TOP>, <CE>, <SP>, const...]
 
 process_eval_recheck_ptrs_revert_stack_underflow:
-    // StackUnderflow(uint256 underflowSize) when [adj_top_ptr < stack_ptr] (TOP' < SP)
-    // Input stack:                     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    dup5 sub                            // [<SP - TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    __FUNC_SIG(StackUnderflow)          // [<__error_selector>, <arg1>, | ...]
+    // error StackUnderflow(uint256 underflowSize) when (LAT < SP)
+    // Input stack:                     // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5 sub                            // [(SP - LAT), | <CP>, <TOP>, <CE>, <SP>, const...]
+    __FUNC_SIG(StackUnderflow)          // [<__error_selector>, <underflowSize>, | ...]
     // fall down to <do_revert_with_error_1_arg>
 
 do_revert_with_error_1_arg:
+    // Input stack:                     // (<__error_selector>, <arg1>), [...]
     REVERT_ERROR_1_ARG()
 
 process_eval_opcode_90_AF_push_data:
@@ -347,12 +348,21 @@ process_eval_recheck_code_ptr:
     dup3 dup2 eq                        // [(CP == CE), | ...]
     process_eval_return_stack_data jumpi
 
-    // OutOfCode(uint256 extraOffset) when (CP > CE)
+    // OutOfCode(uint256 codeOffset) when (CP > CE)
     dup3 dup2 sub                       // [(CP - CE), | ...]
 
 process_eval_revert_out_of_code:
-    __FUNC_SIG(OutOfCode)               // [<__error_selector>, <arg1>, | ...]
+    // error OutOfCode(uint256 codeOffset)
+    // Input stack:                     // [<codeOffset>, | ...]
+    __FUNC_SIG(OutOfCode)               // (<__error_selector>, <codeOffset>), [...]
     do_revert_with_error_1_arg jump
+
+process_eval_revert_out_of_data:
+    // error OutOfData(uint256 dataOffset)
+    // Input stack:                     // [<dataOffset>, | ...]
+    __FUNC_SIG(OutOfData)               // (<__error_selector>, <dataOffset>), [...]
+    do_revert_with_error_1_arg jump
+
 
 
 //
@@ -433,12 +443,12 @@ process_eval_opcode_B2_swap_stack_underflow_v12_continue:
     pop                                 // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     process_eval_recheck_ptrs_revert_stack_underflow jump
 
-process_eval_opcode_B3_top_ptr:
+process_eval_opcode_B3_top:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup2                                // [<TOP>, | ...]
     process_eval_push_value jump
 
-process_eval_opcode_B4_stack_ptr:
+process_eval_opcode_B4_sp:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup4                                // [<SP>, | ...]
     process_eval_push_value jump
@@ -458,9 +468,9 @@ process_eval_opcode_B5_alloc:
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
 
 process_eval_opcode_B5_alloc_revert_illegal_argument:
-    // IllegalArgument(uint256 argValue)
-    // Input stack:                     // [<ARG>, ...]
-    __FUNC_SIG(IllegalArgument)
+    // error IllegalArgument(uint256 argValue)
+    // Input stack:                     // [<argValue>, ...]
+    __FUNC_SIG(IllegalArgument)         // (<__error_selector>, <argValue>), [...]
     do_revert_with_error_1_arg jump
 
 process_eval_opcode_B6_rewind:
@@ -480,6 +490,82 @@ process_eval_opcode_B7_trunc:
     dup6 add                            // [<TOP'>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
     swap3 pop                           // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+//
+//  Opcode 0xB8 DLOAD               [ pop 1 ]   <ptr>
+//  ... | <d_ptr>   |
+//      ^--(LAT)    ^--(TOP = TOP')
+//        (top-1)
+//
+//  require: (d_ptr <= (LAT-0x20))      error OutOfData(d_ptr + 0x20 - LAT)
+//
+process_eval_opcode_B8_dload:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub                      // [<(top-1)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup5 dup2 slt                       // [(LAT < SP), <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jumpi
+                                        // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup1 mload                          // [<d_ptr>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup3 sub                      // [<(LAT-0x20), <d_ptr>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 sgt                            // [(d_ptr > (LAT-0x20)), <d_ptr>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_B8_dload_revert_out_of_data_ahead_top jumpi
+                                        // [<d_ptr>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    mload                               // [<VALUE>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 mstore                         // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_B8_dload_revert_out_of_data_ahead_top:
+    // Input stack:                     // [<d_ptr>, <LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 add sub                       // [(d_ptr+0x20-LAT), | ...]
+    process_eval_revert_out_of_data jump
+
+
+//
+//  Opcode 0xB9 DSAVE               [ pop 2 ]   <data> <ptr>
+//  ... | <data>    <d_ptr> |
+//      ^--(TOP' = LAT)     ^--(TOP)
+//        (top-2)   (top-1)
+//
+//  require: (d_ptr >= SP)              error OutOfData(d_ptr - SP)             *negative value
+//  require: (d_ptr <= (LAT-0x20))      error OutOfData(d_ptr + 0x20 - LAT)
+//
+process_eval_opcode_B9_dsave:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup12 dup4 sub                // [<(top-2)_ptr>, 0x20, | <CP>, <TOP>, <CE>, <SP>, const...]
+
+    // check stack underflow first
+    dup6 dup2 slt                       // [(LAT < SP), <(top-2)_ptr>, 0x20, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_opcode_B9_dsave_revert_stack_underflow jumpi
+                                        // [<(top-2)_ptr>, 0x20, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap3 sub                           // [<(top-1)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    mload                               // [<d_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup5 dup2 slt                       // [(d_ptr < SP), <d_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    process_eval_opcode_B9_dsave_revert_out_of_data_behind_sp jumpi
+                                        // [<d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup11 dup4 sub                      // [(TOP'-0x20), <d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup2 sgt                            // [(d_ptr > (TOP'-0x20)), <d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    process_eval_opcode_B9_dsave_revert_out_of_data_ahead_top jumpi
+                                        // [<d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup3 mload                          // [<VALUE>, <d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    swap1 mstore                        // [<CP>, <TOP'>, <CE>, <SP>, const...]
+    process_eval_recheck_code_ptr jump
+
+
+process_eval_opcode_B9_dsave_revert_stack_underflow:
+    // Input stack:                     // [<LAT>, 0x20, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap1 pop                           // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    process_eval_recheck_ptrs_revert_stack_underflow jump
+
+process_eval_opcode_B9_dsave_revert_out_of_data_behind_sp:
+    // Input stack:                     // [<d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup5 swap1 sub                      // [(d_ptr - SP), ...]
+    process_eval_revert_out_of_data jump
+
+process_eval_opcode_B9_dsave_revert_out_of_data_ahead_top:
+    // Input stack:                     // [<d_ptr>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup11 add                           // [(d_ptr+0x20), | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup3 swap1 sub                      // [(d_ptr+0x20-TOP'), | ...]
+    process_eval_revert_out_of_data jump
 
 process_eval_opcode_C0_add:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -835,6 +921,7 @@ process_eval_opcode_FA_invoke_next:
 //
 
 process_eval_unsupported_opcode:
+    // error UnsupportedOpcode(uint256 opcode)
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     dup14                               // [<OP>, | ...]
     __FUNC_SIG(UnsupportedOpcode)       // (<__error_selector>, <OP>), [...]
@@ -910,22 +997,10 @@ process_eval_opcode_FD_debug:
 //    // 32 opcodes (0x90..0xAF)  | total 192 opcodes
 //
 
-    process_eval_opcode_B0_pop
-    process_eval_opcode_B1_dup
-    process_eval_opcode_B2_swap
-    process_eval_opcode_B3_top_ptr
-    process_eval_opcode_B4_stack_ptr
-    process_eval_opcode_B5_alloc
-    process_eval_opcode_B6_rewind
-    process_eval_opcode_B7_trunc
-    process_eval_unsupported_opcode         // B8
-    process_eval_unsupported_opcode         // B9
-    process_eval_opcode_BA_iszero
-    process_eval_opcode_BB_lt
-    process_eval_opcode_BC_gt
-    process_eval_opcode_BD_slt
-    process_eval_opcode_BE_sgt
-    process_eval_opcode_BF_iff
+    process_eval_opcode_B0_pop      process_eval_opcode_B1_dup      process_eval_opcode_B2_swap     process_eval_opcode_B3_top
+    process_eval_opcode_B4_sp       process_eval_opcode_B5_alloc    process_eval_opcode_B6_rewind   process_eval_opcode_B7_trunc
+    process_eval_opcode_B8_dload    process_eval_opcode_B9_dsave    process_eval_opcode_BA_iszero   process_eval_opcode_BB_lt
+    process_eval_opcode_BC_gt       process_eval_opcode_BD_slt      process_eval_opcode_BE_sgt      process_eval_opcode_BF_iff
 
     process_eval_opcode_C0_add  process_eval_opcode_C1_sub  process_eval_opcode_C2_mul  process_eval_opcode_C3_div
     process_eval_opcode_C4_sdiv process_eval_opcode_C5_mod  process_eval_opcode_C6_smod process_eval_opcode_C7_exp
