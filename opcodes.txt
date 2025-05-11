@@ -124,11 +124,10 @@
     0xE9        RSAVE       (reg[stack[0]] = stack[-1])                     [ pop 2 ]   <data> <reg>
 
 // code evaluation ops
-    0xEA        FINISH      stop evaluation, return with n last bytes of the stack  [ pop 1 ]   <n>
-    0xEB        REVERT      stop evaluation, revert with n last bytes of the stack  [ pop 1 ]   <n>
-    0xEE        STACKSIZE   push current stack size onto the stack
+    0xEA        FINISH      stop evaluation, return with data               [ pop 2 ]   <size> <ptr>
+    0xEB        REVERT      stop evaluation, revert with data               [ pop 2 ]   <size> <ptr>
 
-    (0xED..0xEF reserved)
+    (0xEC..0xEF reserved)
 
     ** SPECIAL_CODES **
 
