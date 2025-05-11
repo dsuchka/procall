@@ -567,6 +567,58 @@ process_eval_opcode_B9_dsave_revert_out_of_data_ahead_top:
     dup3 swap1 sub                      // [(d_ptr+0x20-TOP'), | ...]
     process_eval_revert_out_of_data jump
 
+
+//
+//  Boolean (locical) ops
+//
+
+process_eval_opcode_BA_iszero:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_UNARY_OPCODE(iszero)           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_BB_lt:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_REVERSED(lt)     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_BC_gt:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_REVERSED(gt)     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_BD_slt:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_REVERSED(slt)    // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_BE_sgt:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    EVAL_BINARY_OPCODE_REVERSED(sgt)    // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+process_eval_opcode_BF_iff:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup13 swap1 sub                     // [<(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    dup11 dup2 add                      // [<(top-1)_ptr>, <(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    mload iszero                        // [<!(stack[0])>, <(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
+    process_eval_opcode_BF_iff_continue_unchanged jumpi
+
+    // Input stack:                     // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup3 mload                          // [<stack[-1]>, <LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+    dup2 mstore                         // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
+
+process_eval_opcode_BF_iff_continue_unchanged:
+    // Input stack:                     // [<LAT>, <CP>, <TOP'>, <CE>, <SP>, const...]
+    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+
+//
+//  Math (arithmetical) ops
+//
+
 process_eval_opcode_C0_add:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_BINARY_OPCODE_DIRECT(add)      // [<TOP'>, | <TOP>, <CE>, <SP>, const...]
@@ -649,6 +701,11 @@ process_eval_opcode_CF_sar:
     EVAL_BINARY_OPCODE_DIRECT(sar)      // [<TOP'>, | <TOP>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
 
+
+//
+//  Blockchain runtime data ops
+//
+
 process_eval_opcode_D0_address:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     address                             // [<VALUE>, | ...]
@@ -689,7 +746,7 @@ process_eval_opcode_D7_gasleft:
     gas                                 // [<VALUE>, | ...]
     process_eval_push_value jump
 
-process_eval_opcode_FE00_chaind:
+process_eval_opcode_FE00_chainid:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     chainid                             // [<VALUE>, | ...]
     process_eval_push_value jump
@@ -698,6 +755,11 @@ process_eval_opcode_D8_balanceof:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
     EVAL_UNARY_OPCODE(balance)          // [<LAT>, | <CP>, <TOP>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
+
+
+//
+//  System ops
+//
 
 process_eval_opcode_E8_rload:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -725,49 +787,6 @@ process_eval_opcode_E9_rsave:
     mstore                              // [<CP>, <TOP'>, <CE>, <SP>, const...]
     dup2                                // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
     CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BA_iszero:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    EVAL_UNARY_OPCODE(iszero)           // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BB_lt:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    EVAL_BINARY_OPCODE_REVERSED(lt)     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BC_gt:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    EVAL_BINARY_OPCODE_REVERSED(gt)     // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BD_slt:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    EVAL_BINARY_OPCODE_REVERSED(slt)    // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BE_sgt:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    EVAL_BINARY_OPCODE_REVERSED(sgt)    // [<TOP'>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
-process_eval_opcode_BF_iff:
-    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
-    dup11 dup3 sub                      // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
-    swap2                               // [<TOP>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup13 swap1 sub                     // [<(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    dup11 dup2 add                      // [<(top-1)_ptr>, <(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    mload iszero                        // [<!(stack[0])>, <(top-3)_ptr>, | <CP>, <(top-2)_ptr>, <CE>, <SP>, const...]
-    process_eval_opcode_BF_iff_continue_unchanged jumpi
-
-    // Input stack:                     // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
-    dup3 mload                          // [<stack[-1]>, <LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
-    dup2 mstore                         // [<LAT>, | <CP>, <TOP'>, <CE>, <SP>, const...]
-
-process_eval_opcode_BF_iff_continue_unchanged:
-    // Input stack:                     // [<LAT>, <CP>, <TOP'>, <CE>, <SP>, const...]
-    CHECK_PTRS_AND_HANDLE_NEXT_LAT(process_eval_handle_next_opcode_pop1, process_eval_recheck_ptrs)
-
 
 process_eval_opcode_FE_extended_prefix:
     // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
@@ -1059,7 +1078,7 @@ process_eval_opcode_FD_debug:
     // Extended codes
     //
 
-    process_eval_opcode_FE00_chaind
+    process_eval_opcode_FE00_chainid
     process_eval_unsupported_opcode         // 01
     process_eval_unsupported_opcode         // 02
     process_eval_unsupported_opcode         // 03
