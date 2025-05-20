@@ -905,6 +905,30 @@ process_eval_opcode_EB_revert_finalize_invoke:
 
 
 
+//  0xF1 MCOPY                      // [ pop 3 ]    <dst_ptr>  <src_ptr>  <sz>
+process_eval_opcode_F1_test_mcopy:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup10 dup3 sub mload                // [<sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup4 sub mload                // [<src_ptr>, <sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup14 dup5 sub mload                // [<dst_ptr>, <src_ptr>, <sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    MCOPY()                             // [<CP>, <TOP>, <CE>, <SP>, const...]
+
+    // all done, go to the main loop handler
+    process_eval_main_loop jump
+
+
+//  0xF2 MCOPY                      // [ pop 3 ]    <sz>  <src_ptr>  <dst_ptr>
+process_eval_opcode_F2_test_mcopy:
+    // Input stack:                     // [<CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup3 sub mload                // [<sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup4 sub mload                // [<src_ptr>, <sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup12 dup5 sub mload                // [<dst_ptr>, <src_ptr>, <sz>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    MCOPY()                             // [<CP>, <TOP>, <CE>, <SP>, const...]
+
+    // all done, go to the main loop handler
+    process_eval_main_loop jump
+
+
 //
 //  ** INVOCATION HANDLERS **
 //
@@ -1130,8 +1154,10 @@ process_eval_opcode_FD_debug:
     process_eval_unsupported_opcode         // EF
 
     process_eval_opcode_F0_push_const
-    process_eval_unsupported_opcode         // F1
-    process_eval_unsupported_opcode         // F2
+    process_eval_opcode_F1_test_mcopy
+    process_eval_opcode_F2_test_mcopy
+    //process_eval_unsupported_opcode         // F1
+    //process_eval_unsupported_opcode         // F2
     process_eval_unsupported_opcode         // F3
     process_eval_unsupported_opcode         // F4
     process_eval_unsupported_opcode         // F5

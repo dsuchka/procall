@@ -14,16 +14,108 @@
 
 
 #define macro ZERO() = takes(0) returns(1) {
-    __VERBATIM(0x5f)
-    //__VERBATIM(0x6000)
+    //__VERBATIM(0x5f)
+    __VERBATIM(0x6000)
 }
 
 #define macro DOUBLE_ZERO() = takes(0) returns(2) {
-    __VERBATIM(0x5f5f)
-    //__VERBATIM(0x6000) dup1
+    //__VERBATIM(0x5f5f)
+    __VERBATIM(0x6000) dup1
 }
 
 #define macro TRIPLE_ZERO() = takes(0) returns(3) {
-    __VERBATIM(0x5f5f5f)
-    //__VERBATIM(0x6000) dup1 dup1
+    //__VERBATIM(0x5f5f5f)
+    __VERBATIM(0x6000) dup1 dup1
+}
+
+#define macro MCOPY_CUSTOM() = takes(3) returns(0) {
+    // Input stack:                 // [<dst_ptr>, <src_ptr>, <sz>]
+    0x20                            // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup3 dup3 gt                    // [(dst > src), 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    mcopy_forward_loop jumpi        // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // do copy backward (dst <= src)
+    // add extra var: offset
+    ZERO()                          // [<offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+mcopy_backward_loop:
+    // Input stack                  // [<offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // check remaining size (if less than whole word, to go the tail logic)
+    dup2 dup2 add                   // [<offset'>, <offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup1 dup7 lt                    // [(sz < offset'), <offset'>, <offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    mcopy_backward_pre_tail jumpi   // [<offset'>, <offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // use prev offset (<offset>) to move next chunk, swap with next offset (<offset'>)
+    swap1                           // [<offset>, <offset'>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup5 dup2 add mload             // [<val>, <offset>, <offset'>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    swap1                           // [<offset>, <val>, <offset'>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup5 add mstore                 // [<offset'>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    mcopy_backward_loop jump
+
+mcopy_backward_pre_tail:
+    // Input stack:                 // [<offset'>, <offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    pop                             // [<offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // update sz, dst_ptr and src_ptr (sz -= offset, ptrs += offset)
+    dup3 dup2 add                   // [<dst_ptr'>, <offset>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    swap3 pop                       // [<offset>, 0x20, <dst_ptr'>, <src_ptr>, <sz>]
+    dup4 dup2 add                   // [<src_ptr'>, <offset>, 0x20, <dst_ptr'>, <src_ptr>, <sz>]
+    swap4 pop                       // [<offset>, 0x20, <dst_ptr'>, <src_ptr'>, <sz>]
+    dup5 sub                        // [<sz'>, 0x20, <dst_ptr'>, <src_ptr'>, <sz>]
+    swap4 pop                       // [0x20, <dst_ptr'>, <src_ptr'>, <sz'>]
+    mcopy_tail jump                 // [0x20, <dst_ptr'>, <src_ptr'>, <sz'>]
+
+    // do copy forward (dst > src)
+mcopy_forward_loop:
+    // Input stack                  // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // check remaining size (if less than whole word, to go the tail logic)
+    dup1 dup5 lt                    // [(sz < 0x20), 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    mcopy_tail jumpi                // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // update sz
+    dup1 dup5 sub                   // [(sz - 0x20), 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    swap4 pop                       // [0x20, <dst_ptr>, <src_ptr>, <sz'>]
+
+    // copy next chunk
+    dup3 dup5 add mload             // [<val>, 0x20, <dst_ptr>, <src_ptr>, <sz'>]
+    dup3 dup6 add mstore            // [0x20, <dst_ptr>, <src_ptr>, <sz'>]
+
+    // repeat with new sz
+    mcopy_forward_loop jump         // [0x20, <dst_ptr>, <src_ptr>, <sz'>]
+
+
+mcopy_tail:
+    // Input stack:                 // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup4 iszero                     // [(sz == 0), 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    mcopy_finish jumpi              // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // make mask (0xFF...00)
+    ZERO() not                      // [0xFF...FF, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup5 dup3 sub                   // [<0x20 - sz>, 0xFF...FF, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    0x3 shl                         // [<n_zero_bits>, 0xFF...FF, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    shl                             // [<mask>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // load source value and remove dirty bits
+    dup4 mload                      // [<dirty_val>, <mask>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup2 and                        // [<clean_val>, <mask>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // load destination value and preserve bits to keep unchanged
+    swap1 not                       // [<~mask>, <clean_val>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup4 mload and                  // [<preserved_val>, <clean_val>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+
+    // merge values and store final chunk
+    or                              // [<final_val>, 0x20, <dst_ptr>, <src_ptr>, <sz>]
+    dup3 mstore                     // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+    // fall down to <mcopy_finish>
+
+mcopy_finish:
+    // Input stack:                 // [0x20, <dst_ptr>, <src_ptr>, <sz>]
+    pop pop pop pop
+}
+
+#define macro MCOPY() = takes(3) returns(0) {
+    //mcopy
+    MCOPY_CUSTOM()
 }
