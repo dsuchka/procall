@@ -142,3 +142,21 @@
     EVAL_BINARY_OPCODE_END()        // [<(top-2)_ptr>, | <CP>, <TOP>, <CE>, <SP>, const...]
 }
 
+#define macro DEBUG_RETURN_STACK(count) = takes(0) returns(0) {
+    // Input stack:                 // [s1, s2, s3, ...]
+    ZERO()                          // [<ptr>, | s1, s2, s3, ...]
+    <count>                         // [<cnt>, <ptr>, | s1, s2, s3, ...]
+debug_return_stack_loop:
+    dup1 ZERO() sgt                 // [(0 > cnt), <cnt>, <ptr>, | s1, ...]
+    debug_return_stack_fin jumpi    // [<cnt>, <ptr>, | s1, ...]
+    ZERO() not add                  // [<cnt'>, <ptr>, | s1, ...]
+    swap2                           // [<s1>, <ptr>, | <cnt'>, s2, ...]
+    dup2 0x20 add                   // [<ptr'>, <s1>, <ptr>, | <cnt'>, s2, ...]
+    swap2 mstore                    // [<ptr'>, <cnt'>, | s2, ...]
+    swap1                           // [<cnt'>, <ptr'>, | s2, ...]
+    debug_return_stack_loop jump
+debug_return_stack_fin:
+    <count> 0x20 mul                // [<sz>, ...]
+    ZERO() return
+}
+
