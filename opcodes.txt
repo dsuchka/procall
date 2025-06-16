@@ -143,11 +143,17 @@
 
 // invocation ops
     0xF8        GOTO        go to code address (return from an invocation)          [ pop 1 ]   <addr>
-    0xF9        INVOKETHIS  push next code address and jump within current code     [ pop 1 ]   <offset>
-    0xFA        INVOKENEXT  push operating data, alloc new registers, update ptrs
-                                and jump to a new code on the stack                 [ pop 2 ]   <code_sz> <data_sz>
+    0xF9        INVOKE      push next code address and jump within current code     [ pop 1 ]   <offset>
+    0xFA        INVOKEDEEP  alloc new stack frame and new registers, push args to   [ pop 3 ]
+                                the new allocated stack (total args_sz bytes,           <args_sz>
+                                args_ptr = TOP - 0x60 - args_sz [0x60 = pop 3])             <code_sz>
+                                and jump to the new code on the stack                           <code_ptr>
                             NOTE: to return from the invocation the FINISH/REVERT
                                 opcodes can be used
+                            NOTE: the invocation result will be pushed onto old stack
+                                (at the args_ptr, old args will be poped)
+                                + 1 word of returned data size
+                                + 1 word of result status (bool: 1 - success, 0 - fail)
 
 // other ops
     0xFB        SHA3    pop a data region and push hash of the popped data:
