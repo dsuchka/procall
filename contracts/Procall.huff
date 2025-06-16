@@ -211,6 +211,14 @@ process_eval:
     dup1                                    // [<SP>, <TOP>, <CE>, <CP>, const...]
     swap3                                   // [<CP>, <TOP>, <CE>, <SP>, const...]
 
+    // form and save initial frame descriptor at 0x60 (depth = 0, ret_ptr = 0)
+    dup4 dup12 shl                          // [<SP.00.00>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup4 or                                 // [<SP.00.CE>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 shl                               // [<SP.00.CE.00>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup2 or                                 // [<SP.00.CE.CP>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup11 shl                               // [<SP.00.CE.CP.00>, | <CP>, <TOP>, <CE>, <SP>, const...]
+    dup13 mstore                            // [<CP>, <TOP>, <CE>, <SP>, const...]
+
     // begin evaluation main loop
     process_eval_main_loop jump
 
